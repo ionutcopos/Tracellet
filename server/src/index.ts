@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { getTokenActivity, getWalletOutflows } from "./data/index.ts";
+import { getTokenActivity, getWalletOutflows, getWalletHoldings } from "./data/index.ts";
 import { buildReport } from "./signals.ts";
 import { buildFlowReport } from "./flow.ts";
 import { narrate, narrateFlow } from "./narrate.ts";
@@ -34,8 +34,15 @@ app.post("/trace", async (c) => {
   try {
     const outflows = await getWalletOutflows(wallet.trim(), chainId);
     const report = buildFlowReport(outflows);
-    const narrated = await narrateFlow(report);
-    return c.json(narrated);
+    // Narrate and fetch current holdings in parallel — they're independent.
+    const [narrated, holdings] = await Promise.all([
+      narrateFlow(report),
+      getWalletHoldings(outflows.wallet, outflows.chain).catch((e) => {
+        console.error("holdings fetch failed:", e);
+        return undefined; // holdings are best-effort; don't fail the whole trace
+      }),
+    ]);
+    return c.json({ ...narrated, holdings });
   } catch (e) {
     if (e instanceof Error && e.message === "UNKNOWN_CHAIN") {
       return c.json({ error: "Unrecognized address format. Supported: EVM (0x…), Solana, Bitcoin, Tron." }, 400);

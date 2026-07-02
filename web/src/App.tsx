@@ -8,6 +8,13 @@ interface ChainInfo {
   name: string;
   family: "evm" | "solana" | "bitcoin" | "tron";
   nativeAsset: string;
+  explorerAddr: string;
+  explorerTx: string;
+}
+interface RecipientTx {
+  amount: number;
+  unixTime: number;
+  signature: string | null;
 }
 interface RecipientFlow {
   recipient: string;
@@ -19,6 +26,21 @@ interface RecipientFlow {
   firstUnix: number;
   lastUnix: number;
   flags: string[];
+  txs: RecipientTx[];
+}
+interface TokenHolding {
+  mint: string;
+  symbol: string | null;
+  amount: number;
+  usd: number | null;
+}
+interface WalletHoldings {
+  nativeBalance: number;
+  nativeAsset: string;
+  nativeUsd: number | null;
+  tokenCount: number;
+  nftCount: number;
+  tokens: TokenHolding[];
 }
 interface FlowReport {
   wallet: string;
@@ -29,6 +51,7 @@ interface FlowReport {
   topRecipientPct: number;
   exchangeOut: number;
   recipients: RecipientFlow[];
+  holdings?: WalletHoldings;
   summary?: string;
   concentration?: "low" | "medium" | "high";
 }
@@ -69,6 +92,10 @@ function short(w: string) {
 function fmt(n: number) {
   if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
   return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+}
+function fmtUsd(n: number | null) {
+  if (n == null) return null;
+  return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 function dateRange(a: number, b: number) {
   const f = (u: number) => new Date(u * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -250,7 +277,15 @@ export default function App() {
               >
                 {report.chain.name}
               </span>
-              <span>{short(report.wallet)}</span>
+              <a
+                href={`${report.chain.explorerAddr}${report.wallet}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:underline"
+                style={{ color: C.ink2 }}
+              >
+                {short(report.wallet)} <ExtIcon />
+              </a>
             </div>
 
             {/* stat tiles */}
@@ -308,6 +343,9 @@ export default function App() {
               </p>
             </div>
 
+            {/* current holdings */}
+            {report.holdings && <HoldingsPanel h={report.holdings} chain={report.chain} />}
+
             {/* recipients ranked flow */}
             <div className="rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <div className="px-5 pt-4 pb-3 flex items-baseline justify-between">
@@ -320,7 +358,7 @@ export default function App() {
               </div>
               <div>
                 {report.recipients.slice(0, MAX_ROWS).map((r, i) => (
-                  <RecipientRow key={r.recipient} r={r} rank={i + 1} asset={asset} maxAmt={maxAmt} />
+                  <RecipientRow key={r.recipient} r={r} rank={i + 1} asset={asset} maxAmt={maxAmt} chain={report.chain} />
                 ))}
               </div>
               {report.recipientCount > MAX_ROWS && (
@@ -388,70 +426,199 @@ function Tile({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function RecipientRow({ r, rank, asset, maxAmt }: { r: RecipientFlow; rank: number; asset: string; maxAmt: number }) {
-  const width = Math.max(2, (r.totalAmount / maxAmt) * 100);
-  const title = `${r.txCount} transfer${r.txCount > 1 ? "s" : ""} · ${dateRange(r.firstUnix, r.lastUnix)}\n${r.recipient}`;
+// External-link glyph, inline so it inherits currentColor.
+function ExtIcon() {
   return (
-    <div
-      title={title}
-      className="group px-5 py-3 transition-colors hover:bg-white/[0.02]"
-      style={{ borderTop: `1px solid ${C.line}` }}
-    >
-      <div className="flex items-center gap-3">
-        <span className="text-[11px] w-4 text-right" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-          {rank}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {r.label ? (
-              <span className="text-sm font-medium truncate" style={{ color: C.ink }}>
-                {r.label}
-              </span>
-            ) : (
-              <span
-                className="text-sm truncate"
-                style={{ color: C.ink2, fontFamily: "'JetBrains Mono', monospace" }}
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      strokeLinecap="round" strokeLinejoin="round" className="inline-block opacity-70" aria-hidden>
+      <path d="M14 4h6v6M20 4l-9 9M9 5H5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-4" />
+    </svg>
+  );
+}
+
+function RecipientRow({ r, rank, asset, maxAmt, chain }: { r: RecipientFlow; rank: number; asset: string; maxAmt: number; chain: ChainInfo }) {
+  const [open, setOpen] = useState(false);
+  const width = Math.max(2, (r.totalAmount / maxAmt) * 100);
+  const canExpand = r.txs.length > 0;
+  return (
+    <div style={{ borderTop: `1px solid ${C.line}` }}>
+      <div
+        onClick={() => canExpand && setOpen((o) => !o)}
+        className="group px-5 py-3 transition-colors hover:bg-white/[0.02]"
+        style={{ cursor: canExpand ? "pointer" : "default" }}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] w-4 text-right" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+            {rank}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              {canExpand && (
+                <span
+                  className="text-[9px] transition-transform"
+                  style={{ color: C.muted, transform: open ? "rotate(90deg)" : "none" }}
+                >
+                  ▶
+                </span>
+              )}
+              {r.label ? (
+                <span className="text-sm font-medium truncate" style={{ color: C.ink }}>
+                  {r.label}
+                </span>
+              ) : (
+                <span className="text-sm truncate" style={{ color: C.ink2, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {short(r.recipient)}
+                </span>
+              )}
+              {/* explorer link for the recipient address — stops the row toggle */}
+              <a
+                href={`${chain.explorerAddr}${r.recipient}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title={`View ${short(r.recipient)} on explorer`}
+                className="shrink-0 hover:opacity-100"
+                style={{ color: C.blue }}
               >
-                {short(r.recipient)}
-              </span>
-            )}
-            {r.flags.map((f) => (
-              <span
-                key={f}
-                title={FLAG_STYLE[f]?.title}
-                className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide"
-                style={{
-                  color: FLAG_STYLE[f]?.color ?? C.muted,
-                  background: `${FLAG_STYLE[f]?.color ?? C.muted}14`,
-                }}
-              >
-                {f}
-              </span>
-            ))}
+                <ExtIcon />
+              </a>
+              {r.flags.map((f) => (
+                <span
+                  key={f}
+                  title={FLAG_STYLE[f]?.title}
+                  className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide"
+                  style={{ color: FLAG_STYLE[f]?.color ?? C.muted, background: `${FLAG_STYLE[f]?.color ?? C.muted}14` }}
+                >
+                  {f}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="text-right shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
+            <span className="text-sm font-semibold" style={{ color: C.ink }}>
+              {fmt(r.totalAmount)}
+            </span>
+            <span className="text-[11px] ml-1" style={{ color: C.muted }}>
+              {asset}
+            </span>
+            <span className="text-[11px] ml-2" style={{ color: C.muted }}>
+              {r.pctOfTotal}%
+            </span>
           </div>
         </div>
-        <div className="text-right shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
-          <span className="text-sm font-semibold" style={{ color: C.ink }}>
-            {fmt(r.totalAmount)}
-          </span>
-          <span className="text-[11px] ml-1" style={{ color: C.muted }}>
-            {asset}
-          </span>
-          <span className="text-[11px] ml-2" style={{ color: C.muted }}>
-            {r.pctOfTotal}%
-          </span>
+        {/* proportional flow bar — magnitude, one blue→violet hue, rounded data-end */}
+        <div className="mt-2 ml-7 h-[6px] rounded-full overflow-hidden" style={{ background: C.track }}>
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${width}%`, background: `linear-gradient(90deg, ${C.blue}, ${C.violet})` }}
+          />
         </div>
       </div>
-      {/* proportional flow bar — magnitude, one blue→violet hue, rounded data-end */}
-      <div className="mt-2 ml-7 h-[6px] rounded-full overflow-hidden" style={{ background: C.track }}>
-        <div
-          className="h-full rounded-full transition-all"
-          style={{
-            width: `${width}%`,
-            background: `linear-gradient(90deg, ${C.blue}, ${C.violet})`,
-          }}
-        />
+
+      {/* drill-down: individual transfers to this recipient, largest first */}
+      {open && (
+        <div className="px-5 pb-3 ml-7" style={{ background: "rgba(255,255,255,0.015)" }}>
+          <div className="text-[10px] uppercase tracking-widest pt-2 pb-1.5" style={{ color: C.muted }}>
+            {r.txCount} transfer{r.txCount > 1 ? "s" : ""} · {dateRange(r.firstUnix, r.lastUnix)}
+          </div>
+          <div className="space-y-1">
+            {r.txs.slice(0, 20).map((t, i) => {
+              const inner = (
+                <>
+                  <span style={{ color: C.muted }}>Tx {i + 1}</span>
+                  <span className="ml-auto" style={{ color: C.ink }}>
+                    {fmt(t.amount)} {asset}
+                  </span>
+                  <span className="w-24 text-right" style={{ color: C.muted }}>
+                    {new Date(t.unixTime * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                  {t.signature && <span style={{ color: C.blue }}><ExtIcon /></span>}
+                </>
+              );
+              return t.signature ? (
+                <a
+                  key={i}
+                  href={`${chain.explorerTx}${t.signature}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-3 text-xs py-1 px-2 rounded hover:bg-white/[0.03]"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {inner}
+                </a>
+              ) : (
+                <div key={i} className="flex items-center gap-3 text-xs py-1 px-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {inner}
+                </div>
+              );
+            })}
+            {r.txs.length > 20 && (
+              <div className="text-[10px] px-2 pt-1" style={{ color: C.muted }}>
+                + {r.txs.length - 20} more transfers
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HoldingsPanel({ h, chain }: { h: WalletHoldings; chain: ChainInfo }) {
+  return (
+    <div className="rounded-lg p-5" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] tracking-widest uppercase" style={{ color: C.muted }}>
+          Current holdings
+        </span>
       </div>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 mb-4">
+        <div style={{ fontVariantNumeric: "tabular-nums" }}>
+          <span className="text-2xl font-bold" style={{ color: C.ink }}>
+            {fmt(h.nativeBalance)}
+          </span>
+          <span className="text-xs ml-1" style={{ color: C.muted }}>
+            {h.nativeAsset}
+          </span>
+          {h.nativeUsd != null && (
+            <span className="text-xs ml-2" style={{ color: C.muted }}>
+              {fmtUsd(h.nativeUsd)}
+            </span>
+          )}
+        </div>
+        <div className="text-xs" style={{ color: C.muted }}>
+          <span style={{ color: C.ink2 }}>{h.tokenCount}</span> tokens ·{" "}
+          <span style={{ color: C.ink2 }}>{h.nftCount}</span> NFTs
+        </div>
+      </div>
+      {h.tokens.length > 0 && (
+        <div className="space-y-1">
+          {h.tokens.slice(0, 8).map((t) => (
+            <a
+              key={t.mint}
+              href={`${chain.explorerAddr}${t.mint}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-white/[0.03]"
+              style={{ fontVariantNumeric: "tabular-nums", borderTop: `1px solid ${C.line}` }}
+            >
+              <span className="font-medium" style={{ color: t.symbol ? C.ink : C.ink2, fontFamily: t.symbol ? "inherit" : "'JetBrains Mono', monospace" }}>
+                {t.symbol ?? short(t.mint)}
+              </span>
+              <ExtIcon />
+              <span className="ml-auto" style={{ color: C.ink2 }}>
+                {fmt(t.amount)}
+              </span>
+              {t.usd != null && (
+                <span className="w-20 text-right" style={{ color: C.muted }}>
+                  {fmtUsd(t.usd)}
+                </span>
+              )}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -62,6 +62,8 @@ export interface ChainInfo {
   name: string;          // "Ethereum"
   family: ChainFamily;
   nativeAsset: string;   // "ETH" | "SOL" | "BTC" | "TRX"
+  explorerAddr: string;  // URL prefix for an address, e.g. "https://solscan.io/account/"
+  explorerTx: string;    // URL prefix for a tx, e.g. "https://solscan.io/tx/"
 }
 
 export interface Transfer {
@@ -69,6 +71,7 @@ export interface Transfer {
   amount: number;        // value moved, in the chain's native asset
   asset: string;         // native asset or an on-chain token symbol
   unixTime: number;
+  signature: string | null; // tx signature/hash, for a per-tx explorer link
   // human label for the recipient if it's a known entity (exchange, bridge…)
   toLabel: string | null;
   // true if the recipient is a known CEX deposit address
@@ -85,6 +88,13 @@ export interface WalletOutflows {
 
 // ---- Computed flow signals (this is what the LLM receives) ----
 
+// An individual transfer to one recipient — powers the per-recipient drill-down.
+export interface RecipientTx {
+  amount: number;
+  unixTime: number;
+  signature: string | null;
+}
+
 export interface RecipientFlow {
   recipient: string;
   label: string | null;
@@ -95,6 +105,25 @@ export interface RecipientFlow {
   firstUnix: number;
   lastUnix: number;
   flags: string[];
+  txs: RecipientTx[];    // the individual transfers, largest first
+}
+
+// ---- Current wallet holdings (balance + tokens) ----
+
+export interface TokenHolding {
+  mint: string;
+  symbol: string | null;
+  amount: number;        // UI amount (decimals applied)
+  usd: number | null;    // value in USD if known
+}
+
+export interface WalletHoldings {
+  nativeBalance: number; // current native-asset balance (SOL/ETH/…)
+  nativeAsset: string;
+  nativeUsd: number | null;
+  tokenCount: number;
+  nftCount: number;
+  tokens: TokenHolding[]; // fungible tokens, ranked by USD then amount
 }
 
 export interface FlowReport {
@@ -106,6 +135,7 @@ export interface FlowReport {
   topRecipientPct: number; // concentration: share going to the single biggest sink
   exchangeOut: number;   // total that landed on known exchanges (cashed out)
   recipients: RecipientFlow[]; // ranked by totalAmount, desc
+  holdings?: WalletHoldings;   // current balance + tokens (filled in by the route)
   // filled in by the LLM narration step
   summary?: string;
   concentration?: "low" | "medium" | "high";

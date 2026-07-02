@@ -1,6 +1,6 @@
-import type { TokenActivity, WalletOutflows } from "../types.ts";
-import { mockTokenActivity, mockWalletOutflows } from "./mock.ts";
-import { liveWalletOutflows } from "./live.ts";
+import type { TokenActivity, WalletOutflows, WalletHoldings, ChainInfo } from "../types.ts";
+import { mockTokenActivity, mockWalletOutflows, mockWalletHoldings } from "./mock.ts";
+import { liveWalletOutflows, liveWalletHoldings } from "./live.ts";
 import { CHAINS, detectChain } from "../chains.ts";
 // import { heliusTokenActivity } from "./helius.ts";
 
@@ -31,4 +31,13 @@ export async function getWalletOutflows(
     return liveWalletOutflows(wallet, chain);
   }
   return mockWalletOutflows(wallet, chain);
+}
+
+// Current holdings (balance + tokens). Same swap pattern as outflows. Takes an
+// already-resolved chain (the route detects once and passes it to both calls).
+export async function getWalletHoldings(wallet: string, chain: ChainInfo): Promise<WalletHoldings> {
+  if (chain.family === "solana") {
+    return liveWalletHoldings(wallet, chain);
+  }
+  return mockWalletHoldings(wallet, chain);
 }

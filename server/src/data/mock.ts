@@ -5,6 +5,8 @@ import type {
   ChainInfo,
   WalletOutflows,
   Transfer,
+  WalletHoldings,
+  TokenHolding,
 } from "../types.ts";
 
 // Deterministic-ish mock generator. Produces a realistic-looking early-buyer
@@ -172,6 +174,7 @@ export function mockWalletOutflows(wallet: string, chain: ChainInfo): WalletOutf
       amount,
       asset: chain.nativeAsset,
       unixTime,
+      signature: fakeSignature(rnd, chain),
       toLabel: r.label,
       isExchange: r.isExchange,
     });
@@ -179,4 +182,42 @@ export function mockWalletOutflows(wallet: string, chain: ChainInfo): WalletOutf
 
   transfers.sort((a, b) => a.unixTime - b.unixTime);
   return { wallet, chain, firstSeenUnix, lastSeenUnix, transfers };
+}
+
+// A plausible-looking tx hash for the mock (base58 for Solana-ish, 0x-hex for EVM).
+function fakeSignature(rnd: () => number, chain: ChainInfo): string {
+  if (chain.family === "evm") {
+    let s = "0x";
+    for (let i = 0; i < 64; i++) s += HEX[Math.floor(rnd() * 16)];
+    return s;
+  }
+  let s = "";
+  for (let i = 0; i < 64; i++) s += B58[Math.floor(rnd() * B58.length)];
+  return s;
+}
+
+// Mock current holdings for chains not yet wired to live data.
+export function mockWalletHoldings(wallet: string, chain: ChainInfo): WalletHoldings {
+  const rnd = seeded(wallet + chain.id + "holdings");
+  const nativeBalance = +(rnd() * 40).toFixed(4);
+  const price =
+    chain.nativeAsset === "ETH" ? 3200 :
+    chain.nativeAsset === "SOL" ? 150 :
+    chain.nativeAsset === "BTC" ? 65000 :
+    chain.nativeAsset === "BNB" ? 600 : 1;
+  const symbols = ["USDC", "JUP", "BONK", "WIF", "PEPE", "PYTH", "JTO", "RAY"];
+  const tokenCount = Math.floor(rnd() * 5); // 0-4 tokens
+  const tokens: TokenHolding[] = Array.from({ length: tokenCount }, () => {
+    const amount = +(rnd() * 5000).toFixed(2);
+    const usd = +(amount * (0.01 + rnd() * 3)).toFixed(2);
+    return { mint: chainAddress(rnd, chain), symbol: symbols[Math.floor(rnd() * symbols.length)], amount, usd };
+  }).sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0));
+  return {
+    nativeBalance,
+    nativeAsset: chain.nativeAsset,
+    nativeUsd: +(nativeBalance * price).toFixed(2),
+    tokenCount,
+    nftCount: Math.floor(rnd() * 6),
+    tokens,
+  };
 }

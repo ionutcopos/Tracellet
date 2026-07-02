@@ -39,15 +39,31 @@ go?"** Same architecture, new pipeline.
   Tron with live Groq narration; the summary quotes only computed numbers. Frontend
   screenshotted on Ethereum and Solana traces.
 
+## Day 3 — live Solana + enrichment
+
+- **Live Solana via Helius.** `live.ts` pulls real outbound native-SOL transfers
+  (Enhanced Transactions API, paginated). Key insight from testing against a real
+  pump.fun wallet: raw data is noise-heavy (ATA rent ~0.00204 SOL, fee dust), so a
+  **dust filter (<0.005 SOL)** is what makes the ranking mean anything.
+- **Entity labels (`labels.ts`), two honest tiers:** a tiny curated address map
+  (mislabeling is worse than no label) + protocol context from Helius `source`
+  (PUMP_FUN→pump.fun, JUPITER→Jupiter…). Turns raw addresses into "PumpSwap".
+- **Holdings** (balance + tokens + NFTs) via Helius DAS `getAssetsByOwner`.
+- **Per-recipient drill-down:** `flow.ts` keeps each recipient's individual
+  transfers; the UI expands a row into "Tx 1 = 2.002 SOL…" with per-tx explorer links.
+- **Explorer links** per chain (`explorerAddr`/`explorerTx` on ChainInfo).
+- **Bug I caught by watching the app:** the AI summary silently fell back to the
+  template. Cause: I was sending each recipient's full `txs` array (hundreds of
+  entries) to the LLM, which broke the response → `JSON.parse("")`. Fix: strip
+  `txs` before narration — the model only needs aggregates.
+
 ## TODO (next sessions)
 
-- [ ] Implement live data adapters in `server/src/data/live.ts`, one chain at a time
-      (Solana via Helius first — key is already in `.env`).
-- [ ] Add unit tests for `flow.ts` (aggregation, concentration thresholds, exchange
-      totals) and `chains.ts` (the ambiguous BTC-legacy vs Solana cases).
-- [ ] Per-recipient hover tooltip (currently a `title` attr) and a copy-address action.
+- [ ] Live EVM data (Etherscan/Alchemy) — next chain after Solana.
+- [ ] Real entity labels from a dataset (Arkham/Solana FM) so "to exchanges" is meaningful.
+- [ ] Count SPL-token outflows (needs price data to value them in SOL terms).
+- [ ] Unit tests for `flow.ts` and `chains.ts` (ambiguous BTC-legacy vs Solana).
 - [ ] Optional: multi-hop tracing ("follow it through layers") as a v2.
-- [ ] Short Loom for the portfolio case study.
 
 ## Notes to self
 

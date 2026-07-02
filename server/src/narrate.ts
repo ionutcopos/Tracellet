@@ -104,8 +104,13 @@ export async function narrateFlow(r: FlowReport): Promise<FlowReport> {
     "agree or override it, but if you override, say why. Respond ONLY as JSON: " +
     '{"summary": string, "concentration": "low"|"medium"|"high"}. No markdown, no preamble.';
 
-  // Trim to the top recipients to keep the prompt small and focused.
-  const compact = { ...r, recipients: r.recipients.slice(0, 12) };
+  // Trim to the top recipients AND drop each recipient's individual-transfer list
+  // (`txs`) — the narration only needs the aggregates, and the per-tx arrays can be
+  // hundreds of entries, which bloats the prompt and breaks the response.
+  const compact = {
+    ...r,
+    recipients: r.recipients.slice(0, 12).map(({ txs, ...rest }) => rest),
+  };
   const user = JSON.stringify({ baseline, report: compact });
 
   try {

@@ -35,6 +35,7 @@ export function buildFlowReport(o: WalletOutflows): FlowReport {
         firstUnix: t.unixTime,
         lastUnix: t.unixTime,
         flags: [],
+        txs: [],
       };
       byRecipient.set(t.to, r);
     }
@@ -42,6 +43,7 @@ export function buildFlowReport(o: WalletOutflows): FlowReport {
     r.txCount += 1;
     r.firstUnix = Math.min(r.firstUnix, t.unixTime);
     r.lastUnix = Math.max(r.lastUnix, t.unixTime);
+    r.txs.push({ amount: t.amount, unixTime: t.unixTime, signature: t.signature });
     // keep a label/exchange flag if any transfer to this recipient had one
     if (!r.label && t.toLabel) r.label = t.toLabel;
     if (t.isExchange) r.isExchange = true;
@@ -54,6 +56,8 @@ export function buildFlowReport(o: WalletOutflows): FlowReport {
   for (const r of recipients) {
     r.totalAmount = +r.totalAmount.toFixed(4);
     r.pctOfTotal = +((r.totalAmount / denom) * 100).toFixed(1);
+    r.txs.sort((a, b) => b.amount - a.amount); // largest transfer first
+
     if (r.isExchange) r.flags.push("cash-out");
     if ((largestTx.get(r.recipient) ?? 0) / denom >= SINGLE_LARGE_PCT) r.flags.push("single-large");
     if (r.txCount >= REPEATED_TX_COUNT) r.flags.push("repeated");

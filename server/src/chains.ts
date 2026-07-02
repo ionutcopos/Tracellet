@@ -11,14 +11,14 @@ import type { ChainInfo } from "./types.ts";
 // choice (the UI exposes a selector, defaulting to Ethereum).
 
 export const CHAINS: Record<string, ChainInfo> = {
-  ethereum: { id: "ethereum", name: "Ethereum", family: "evm", nativeAsset: "ETH" },
-  base:     { id: "base",     name: "Base",     family: "evm", nativeAsset: "ETH" },
-  arbitrum: { id: "arbitrum", name: "Arbitrum", family: "evm", nativeAsset: "ETH" },
-  polygon:  { id: "polygon",  name: "Polygon",  family: "evm", nativeAsset: "POL" },
-  bsc:      { id: "bsc",      name: "BNB Chain", family: "evm", nativeAsset: "BNB" },
-  solana:   { id: "solana",   name: "Solana",   family: "solana", nativeAsset: "SOL" },
-  bitcoin:  { id: "bitcoin",  name: "Bitcoin",  family: "bitcoin", nativeAsset: "BTC" },
-  tron:     { id: "tron",     name: "Tron",     family: "tron", nativeAsset: "TRX" },
+  ethereum: { id: "ethereum", name: "Ethereum", family: "evm", nativeAsset: "ETH", explorerAddr: "https://etherscan.io/address/", explorerTx: "https://etherscan.io/tx/" },
+  base:     { id: "base",     name: "Base",     family: "evm", nativeAsset: "ETH", explorerAddr: "https://basescan.org/address/", explorerTx: "https://basescan.org/tx/" },
+  arbitrum: { id: "arbitrum", name: "Arbitrum", family: "evm", nativeAsset: "ETH", explorerAddr: "https://arbiscan.io/address/", explorerTx: "https://arbiscan.io/tx/" },
+  polygon:  { id: "polygon",  name: "Polygon",  family: "evm", nativeAsset: "POL", explorerAddr: "https://polygonscan.com/address/", explorerTx: "https://polygonscan.com/tx/" },
+  bsc:      { id: "bsc",      name: "BNB Chain", family: "evm", nativeAsset: "BNB", explorerAddr: "https://bscscan.com/address/", explorerTx: "https://bscscan.com/tx/" },
+  solana:   { id: "solana",   name: "Solana",   family: "solana", nativeAsset: "SOL", explorerAddr: "https://solscan.io/account/", explorerTx: "https://solscan.io/tx/" },
+  bitcoin:  { id: "bitcoin",  name: "Bitcoin",  family: "bitcoin", nativeAsset: "BTC", explorerAddr: "https://mempool.space/address/", explorerTx: "https://mempool.space/tx/" },
+  tron:     { id: "tron",     name: "Tron",     family: "tron", nativeAsset: "TRX", explorerAddr: "https://tronscan.org/#/address/", explorerTx: "https://tronscan.org/#/transaction/" },
 };
 
 // EVM chains a 0x… address could resolve to — offered in the UI selector.
