@@ -61,6 +61,8 @@ const FLAG_STYLE: Record<string, { color: string; title: string }> = {
   mixer: { color: C.critical, title: "Recipient is a known mixer" },
 };
 
+const MAX_ROWS = 30; // real wallets can have hundreds of recipients — cap the list
+
 function short(w: string) {
   return `${w.slice(0, 6)}…${w.slice(-4)}`;
 }
@@ -317,10 +319,16 @@ export default function App() {
                 </span>
               </div>
               <div>
-                {report.recipients.map((r, i) => (
+                {report.recipients.slice(0, MAX_ROWS).map((r, i) => (
                   <RecipientRow key={r.recipient} r={r} rank={i + 1} asset={asset} maxAmt={maxAmt} />
                 ))}
               </div>
+              {report.recipientCount > MAX_ROWS && (
+                <div className="px-5 py-3 text-[11px]" style={{ color: C.muted, borderTop: `1px solid ${C.line}` }}>
+                  + {report.recipientCount - MAX_ROWS} more destinations, each below{" "}
+                  {report.recipients[MAX_ROWS - 1].pctOfTotal}% of outflow
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -340,7 +348,7 @@ export default function App() {
         )}
 
         <footer className="mt-12 text-[11px] text-center" style={{ color: C.muted }}>
-          Code computes the flow · AI narrates it · running on mock data
+          Code computes the flow · AI narrates it · Solana is live via Helius, other chains on mock
         </footer>
       </div>
     </div>

@@ -1,8 +1,8 @@
 import type { TokenActivity, WalletOutflows } from "../types.ts";
 import { mockTokenActivity, mockWalletOutflows } from "./mock.ts";
+import { liveWalletOutflows } from "./live.ts";
 import { CHAINS, detectChain } from "../chains.ts";
 // import { heliusTokenActivity } from "./helius.ts";
-// import { liveWalletOutflows } from "./live.ts";
 
 // THE swap point. The rest of the app calls these functions and never knows or
 // cares where the data came from. To go live: implement the live adapter and
@@ -25,6 +25,10 @@ export async function getWalletOutflows(
   if (!chain) {
     throw new Error("UNKNOWN_CHAIN");
   }
+  // Solana is wired to live Helius data; other chains still use mock until their
+  // adapters land in live.ts. This is the swap point — one line per chain.
+  if (chain.family === "solana") {
+    return liveWalletOutflows(wallet, chain);
+  }
   return mockWalletOutflows(wallet, chain);
-  // return liveWalletOutflows(wallet, chain);
 }
