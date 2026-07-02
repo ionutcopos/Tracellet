@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.png" alt="Tracellet logo" width="96" height="96">
+</p>
+
 # Tracellet — Trace the Wallet
 
 Paste any wallet address and see **where its money went**: every outbound transfer,
