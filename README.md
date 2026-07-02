@@ -10,7 +10,7 @@ plain-language summary. Multi-chain — the chain is detected from the address f
 so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
 
 <p align="center">
-  <img src="docs/screenshots/tracellet-flow.png" alt="Tracellet tracing a Solana wallet" width="760">
+  <img src="docs/screenshots/tracellet-flow.jpg" alt="Tracellet tracing a Solana wallet" width="760">
 </p>
 
 > **Design principle:** *Code decides, AI narrates.* The chain is classified by a
