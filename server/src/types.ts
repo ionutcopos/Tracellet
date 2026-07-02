@@ -66,46 +66,62 @@ export interface ChainInfo {
   explorerTx: string;    // URL prefix for a tx, e.g. "https://solscan.io/tx/"
 }
 
+// Direction of a transfer relative to the traced wallet.
+export type Direction = "in" | "out";
+
+// Entity label category (see labels.ts). Drives the UI chip and isExchange.
+export type LabelType = "cex" | "dex" | "bridge" | "staking" | "program" | "burn";
+
 export interface Transfer {
-  to: string;            // recipient address
-  amount: number;        // value moved, in the chain's native asset
-  asset: string;         // native asset or an on-chain token symbol
+  direction: Direction;      // "out" = wallet sent it, "in" = wallet received it
+  counterparty: string;      // the OTHER party (recipient if out, sender if in)
+  amount: number;            // value moved, in the chain's native asset
+  asset: string;             // native asset or an on-chain token symbol
   unixTime: number;
-  signature: string | null; // tx signature/hash, for a per-tx explorer link
-  // human label for the recipient if it's a known entity (exchange, bridge…)
-  toLabel: string | null;
-  // true if the recipient is a known CEX deposit address
-  isExchange: boolean;
+  signature: string | null;  // tx signature/hash, for a per-tx explorer link
+  // human label for the counterparty if it's a known entity (exchange, bridge…)
+  counterpartyLabel: string | null;
+  labelType: LabelType | null;
+  isExchange: boolean;       // counterparty is a known CEX
 }
 
-export interface WalletOutflows {
+export interface WalletTransfers {
   wallet: string;
   chain: ChainInfo;
   firstSeenUnix: number;
   lastSeenUnix: number;
-  transfers: Transfer[]; // OUTBOUND only — money leaving this wallet
+  transfers: Transfer[]; // BOTH directions — money in and out
 }
 
 // ---- Computed flow signals (this is what the LLM receives) ----
 
-// An individual transfer to one recipient — powers the per-recipient drill-down.
-export interface RecipientTx {
+// An individual transfer with a counterparty — powers the per-counterparty drill-down.
+export interface CounterpartyTx {
+  direction: Direction;
   amount: number;
   unixTime: number;
   signature: string | null;
 }
 
-export interface RecipientFlow {
-  recipient: string;
+// One counterparty, aggregated across both directions. The UI's direction toggle
+// and ranking control derive the displayed view from these raw amounts.
+export interface CounterpartyFlow {
+  counterparty: string;
   label: string | null;
+  labelType: LabelType | null;
   isExchange: boolean;
-  totalAmount: number;   // sum of everything sent to this recipient (native units)
+  outAmount: number;     // total sent TO this counterparty (native units)
+  inAmount: number;      // total received FROM this counterparty
+  netAmount: number;     // outAmount - inAmount
+  totalAmount: number;   // outAmount + inAmount (gross volume)
+  outTxCount: number;
+  inTxCount: number;
   txCount: number;
-  pctOfTotal: number;    // share of the wallet's total outflow, 0-100
+  pctOfOut: number;      // share of the wallet's total OUTFLOW, 0-100 (concentration)
   firstUnix: number;
   lastUnix: number;
   flags: string[];
-  txs: RecipientTx[];    // the individual transfers, largest first
+  txs: CounterpartyTx[]; // the individual transfers, largest first
 }
 
 // ---- Current wallet holdings (balance + tokens) ----
@@ -113,6 +129,7 @@ export interface RecipientFlow {
 export interface TokenHolding {
   mint: string;
   symbol: string | null;
+  name: string | null;   // human name if known (e.g. "SuperFriend")
   amount: number;        // UI amount (decimals applied)
   usd: number | null;    // value in USD if known
 }
@@ -130,11 +147,16 @@ export interface FlowReport {
   wallet: string;
   chain: ChainInfo;
   totalOut: number;      // total outflow in native units
-  transferCount: number;
-  recipientCount: number;
-  topRecipientPct: number; // concentration: share going to the single biggest sink
+  totalIn: number;       // total inflow in native units
+  netTotal: number;      // totalIn - totalOut
+  transferCount: number; // both directions
+  outCount: number;
+  inCount: number;
+  counterpartyCount: number;
+  topRecipientPct: number; // concentration: share of OUTFLOW to the single biggest sink
   exchangeOut: number;   // total that landed on known exchanges (cashed out)
-  recipients: RecipientFlow[]; // ranked by totalAmount, desc
+  counterparties: CounterpartyFlow[]; // ranked by outAmount, desc (UI re-ranks)
+  allTransfers: Transfer[]; // full list for the "see all transactions" view
   holdings?: WalletHoldings;   // current balance + tokens (filled in by the route)
   // filled in by the LLM narration step
   summary?: string;

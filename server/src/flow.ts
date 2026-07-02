@@ -1,96 +1,117 @@
 import type {
-  WalletOutflows,
-  RecipientFlow,
+  WalletTransfers,
+  CounterpartyFlow,
   FlowReport,
 } from "./types.ts";
 
 // Deterministic fund-flow computation. Like signals.ts, this is the part that must
 // be CORRECT: pure (no I/O, no LLM), the only thing that produces numbers. It
-// aggregates a wallet's outbound transfers by recipient and computes concentration.
-// The LLM downstream only narrates what this outputs.
+// aggregates a wallet's transfers (both directions) by counterparty and computes
+// concentration. The LLM downstream only narrates what this outputs.
 
-// A recipient counts as "single-large" if one transfer to it is a big slug of the
-// wallet's total outflow — the kind of move worth calling out.
+// A counterparty counts as "single-large" if one outbound transfer to it is a big
+// slug of the wallet's total outflow — the kind of move worth calling out.
 const SINGLE_LARGE_PCT = 0.15;
-// Many small transfers to the same sink over time = a consolidation pattern.
+// Many transfers to the same counterparty = a consolidation / repeated pattern.
 const REPEATED_TX_COUNT = 5;
+const MIXER_LABELS = new Set(["Tornado Cash", "Tornado.Cash"]);
 
-export function buildFlowReport(o: WalletOutflows): FlowReport {
-  const totalOut = o.transfers.reduce((s, t) => s + t.amount, 0);
+export function buildFlowReport(o: WalletTransfers): FlowReport {
+  let totalOut = 0;
+  let totalIn = 0;
+  let outCount = 0;
+  let inCount = 0;
 
-  // Aggregate by recipient address.
-  const byRecipient = new Map<string, RecipientFlow>();
-  const largestTx = new Map<string, number>();
+  const byParty = new Map<string, CounterpartyFlow>();
+  const largestOutTx = new Map<string, number>();
 
   for (const t of o.transfers) {
-    let r = byRecipient.get(t.to);
-    if (!r) {
-      r = {
-        recipient: t.to,
-        label: t.toLabel,
+    if (t.direction === "out") { totalOut += t.amount; outCount++; }
+    else { totalIn += t.amount; inCount++; }
+
+    let c = byParty.get(t.counterparty);
+    if (!c) {
+      c = {
+        counterparty: t.counterparty,
+        label: t.counterpartyLabel,
+        labelType: t.labelType,
         isExchange: t.isExchange,
-        totalAmount: 0,
-        txCount: 0,
-        pctOfTotal: 0,
+        outAmount: 0, inAmount: 0, netAmount: 0, totalAmount: 0,
+        outTxCount: 0, inTxCount: 0, txCount: 0,
+        pctOfOut: 0,
         firstUnix: t.unixTime,
         lastUnix: t.unixTime,
         flags: [],
         txs: [],
       };
-      byRecipient.set(t.to, r);
+      byParty.set(t.counterparty, c);
     }
-    r.totalAmount += t.amount;
-    r.txCount += 1;
-    r.firstUnix = Math.min(r.firstUnix, t.unixTime);
-    r.lastUnix = Math.max(r.lastUnix, t.unixTime);
-    r.txs.push({ amount: t.amount, unixTime: t.unixTime, signature: t.signature });
-    // keep a label/exchange flag if any transfer to this recipient had one
-    if (!r.label && t.toLabel) r.label = t.toLabel;
-    if (t.isExchange) r.isExchange = true;
-    largestTx.set(t.to, Math.max(largestTx.get(t.to) ?? 0, t.amount));
+    if (t.direction === "out") {
+      c.outAmount += t.amount;
+      c.outTxCount++;
+      largestOutTx.set(t.counterparty, Math.max(largestOutTx.get(t.counterparty) ?? 0, t.amount));
+    } else {
+      c.inAmount += t.amount;
+      c.inTxCount++;
+    }
+    c.txCount++;
+    c.firstUnix = Math.min(c.firstUnix, t.unixTime);
+    c.lastUnix = Math.max(c.lastUnix, t.unixTime);
+    c.txs.push({ direction: t.direction, amount: t.amount, unixTime: t.unixTime, signature: t.signature });
+    // keep a label/type if any transfer to/from this counterparty had one
+    if (!c.label && t.counterpartyLabel) { c.label = t.counterpartyLabel; c.labelType = t.labelType; }
+    if (t.isExchange) c.isExchange = true;
   }
 
-  const recipients = [...byRecipient.values()];
-  const denom = totalOut > 0 ? totalOut : 1;
+  const counterparties = [...byParty.values()];
+  const outDenom = totalOut > 0 ? totalOut : 1;
 
-  for (const r of recipients) {
-    r.totalAmount = +r.totalAmount.toFixed(4);
-    r.pctOfTotal = +((r.totalAmount / denom) * 100).toFixed(1);
-    r.txs.sort((a, b) => b.amount - a.amount); // largest transfer first
+  for (const c of counterparties) {
+    c.outAmount = +c.outAmount.toFixed(4);
+    c.inAmount = +c.inAmount.toFixed(4);
+    c.netAmount = +(c.outAmount - c.inAmount).toFixed(4);
+    c.totalAmount = +(c.outAmount + c.inAmount).toFixed(4);
+    c.pctOfOut = +((c.outAmount / outDenom) * 100).toFixed(1);
+    c.txs.sort((a, b) => b.amount - a.amount); // largest transfer first
 
-    if (r.isExchange) r.flags.push("cash-out");
-    if ((largestTx.get(r.recipient) ?? 0) / denom >= SINGLE_LARGE_PCT) r.flags.push("single-large");
-    if (r.txCount >= REPEATED_TX_COUNT) r.flags.push("repeated");
-    if (r.label === "Tornado Cash") r.flags.push("mixer");
+    if (c.isExchange && c.outAmount > 0) c.flags.push("cash-out");
+    if ((largestOutTx.get(c.counterparty) ?? 0) / outDenom >= SINGLE_LARGE_PCT) c.flags.push("single-large");
+    if (c.txCount >= REPEATED_TX_COUNT) c.flags.push("repeated");
+    if (c.label && MIXER_LABELS.has(c.label)) c.flags.push("mixer");
   }
 
-  // Rank by total sent, biggest sink first.
-  recipients.sort((a, b) => b.totalAmount - a.totalAmount);
+  // Default rank: biggest outflow sink first (the UI re-ranks per the active metric).
+  counterparties.sort((a, b) => b.outAmount - a.outAmount);
 
-  const exchangeOut = +recipients
-    .filter((r) => r.isExchange)
-    .reduce((s, r) => s + r.totalAmount, 0)
+  const exchangeOut = +counterparties
+    .filter((c) => c.isExchange)
+    .reduce((s, c) => s + c.outAmount, 0)
     .toFixed(4);
 
-  const topRecipientPct = recipients.length ? recipients[0].pctOfTotal : 0;
+  const topRecipientPct = counterparties.length ? counterparties[0].pctOfOut : 0;
 
   return {
     wallet: o.wallet,
     chain: o.chain,
     totalOut: +totalOut.toFixed(4),
+    totalIn: +totalIn.toFixed(4),
+    netTotal: +(totalIn - totalOut).toFixed(4),
     transferCount: o.transfers.length,
-    recipientCount: recipients.length,
+    outCount,
+    inCount,
+    counterpartyCount: counterparties.length,
     topRecipientPct,
     exchangeOut,
-    recipients,
+    counterparties,
+    allTransfers: o.transfers,
   };
 }
 
 // Deterministic fallback verdict, used when there's no LLM key. Also gives the
 // LLM a baseline it must justify or override. "Concentration" = how much of the
-// wallet's money funneled into its single biggest destination.
+// wallet's OUTFLOW funneled into its single biggest destination.
 export function concentrationVerdict(r: FlowReport): "low" | "medium" | "high" {
-  if (r.topRecipientPct >= 60 || r.recipientCount <= 2) return "high";
-  if (r.topRecipientPct >= 35 || r.recipientCount <= 5) return "medium";
+  if (r.topRecipientPct >= 60 || r.counterpartyCount <= 2) return "high";
+  if (r.topRecipientPct >= 35 || r.counterpartyCount <= 5) return "medium";
   return "low";
 }

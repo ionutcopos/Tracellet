@@ -1,7 +1,7 @@
-import type { ChainInfo, WalletOutflows, Transfer, WalletHoldings, TokenHolding } from "../types.ts";
-import { entityLabel, sourceLabel } from "../labels.ts";
+import type { ChainInfo, WalletTransfers, Transfer, WalletHoldings, TokenHolding } from "../types.ts";
+import { entityLabel, sourceLabel, isExchangeType, type Label } from "../labels.ts";
 
-// Live on-chain data. The job of this file is: raw provider JSON -> WalletOutflows.
+// Live on-chain data. The job of this file is: raw provider JSON -> WalletTransfers.
 // Nothing else in the app sees a raw provider response. Chain is already detected
 // upstream, so this dispatches on chain.family. Solana is wired (Helius); the
 // other families are stubbed with their provider plan.
@@ -29,7 +29,7 @@ interface HeliusTx {
   nativeTransfers?: HeliusNativeTransfer[];
 }
 
-async function heliusSolanaOutflows(wallet: string, chain: ChainInfo, key: string): Promise<WalletOutflows> {
+async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: string): Promise<WalletTransfers> {
   const transfers: Transfer[] = [];
   let before: string | undefined;
 
@@ -46,20 +46,25 @@ async function heliusSolanaOutflows(wallet: string, chain: ChainInfo, key: strin
 
     for (const tx of txs) {
       for (const nt of tx.nativeTransfers ?? []) {
-        if (nt.fromUserAccount !== wallet) continue; // outbound only
-        if (!nt.toUserAccount || nt.toUserAccount === wallet) continue; // skip self
+        const out = nt.fromUserAccount === wallet;
+        const inbound = nt.toUserAccount === wallet;
+        if (out === inbound) continue; // skip self-transfers and unrelated legs
+        const counterparty = out ? nt.toUserAccount : nt.fromUserAccount;
+        if (!counterparty) continue;
         const sol = nt.amount / LAMPORTS_PER_SOL;
         if (sol < DUST_SOL) continue; // drop rent/fee noise
         // Tier 1: curated entity label. Tier 2: protocol the transfer flowed through.
-        const entity = entityLabel("solana", nt.toUserAccount);
+        const meta: Label | null = entityLabel("solana", counterparty) ?? sourceLabel(tx.source);
         transfers.push({
-          to: nt.toUserAccount,
+          direction: out ? "out" : "in",
+          counterparty,
           amount: +sol.toFixed(4),
           asset: "SOL",
           unixTime: tx.timestamp,
           signature: tx.signature,
-          toLabel: entity?.label ?? sourceLabel(tx.source),
-          isExchange: entity?.isExchange ?? false,
+          counterpartyLabel: meta?.label ?? null,
+          labelType: meta?.type ?? null,
+          isExchange: isExchangeType(meta?.type ?? null),
         });
       }
     }
@@ -101,6 +106,7 @@ interface DasItem {
   id: string;
   interface: string; // FungibleToken | FungibleAsset | V1_NFT | ProgrammableNFT…
   token_info?: DasTokenInfo;
+  content?: { metadata?: { name?: string; symbol?: string } };
 }
 
 async function heliusSolanaHoldings(wallet: string, key: string): Promise<WalletHoldings> {
@@ -133,10 +139,13 @@ async function heliusSolanaHoldings(wallet: string, key: string): Promise<Wallet
     .filter((i) => isFungible(i) && (i.token_info?.balance ?? 0) > 0)
     .map((i) => {
       const ti = i.token_info!;
+      const md = i.content?.metadata ?? {};
       const dec = ti.decimals ?? 0;
+      const clean = (s?: string) => (s && s.trim() ? s.trim() : null);
       return {
         mint: i.id,
-        symbol: ti.symbol && ti.symbol.trim() ? ti.symbol : null,
+        symbol: clean(ti.symbol) ?? clean(md.symbol),
+        name: clean(md.name),
         amount: +(ti.balance! / 10 ** dec).toFixed(4),
         usd: ti.price_info?.total_price != null ? +ti.price_info.total_price.toFixed(2) : null,
       };
@@ -159,11 +168,11 @@ async function heliusSolanaHoldings(wallet: string, key: string): Promise<Wallet
 //   evm     -> Etherscan-family `txlist`+`tokentx`, or Alchemy/Covalent multichain
 //   bitcoin -> mempool.space / Blockstream (filter change outputs back to sender)
 //   tron    -> TronGrid /v1/accounts/{addr}/transactions
-export async function liveWalletOutflows(wallet: string, chain: ChainInfo): Promise<WalletOutflows> {
+export async function liveWalletTransfers(wallet: string, chain: ChainInfo): Promise<WalletTransfers> {
   if (chain.family === "solana") {
     const key = process.env.HELIUS_API_KEY;
     if (!key) throw new Error("HELIUS_API_KEY is not set");
-    return heliusSolanaOutflows(wallet, chain, key);
+    return heliusSolanaTransfers(wallet, chain, key);
   }
   throw new Error(`live data not implemented for ${chain.family} — see live.ts`);
 }

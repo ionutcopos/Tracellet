@@ -3,10 +3,11 @@ import type {
   WalletActivity,
   Trade,
   ChainInfo,
-  WalletOutflows,
+  WalletTransfers,
   Transfer,
   WalletHoldings,
   TokenHolding,
+  LabelType,
 } from "../types.ts";
 
 // Deterministic-ish mock generator. Produces a realistic-looking early-buyer
@@ -109,14 +110,20 @@ function chainAddress(rnd: () => number, chain: ChainInfo): string {
   return s;
 }
 
-// Known-entity labels, per family, so some outflows look like real cash-outs.
+// Known-entity labels, per family, so some flows look like real cash-outs.
 const EXCHANGES: Record<string, string[]> = {
   evm: ["Binance", "Coinbase", "Kraken", "OKX", "Bybit"],
   solana: ["Binance", "Coinbase", "Kraken", "OKX"],
   bitcoin: ["Binance", "Coinbase", "Kraken"],
   tron: ["Binance", "OKX", "Bybit"],
 };
-const OTHER_LABELS = ["Uniswap Router", "Bridge: Wormhole", "Tornado Cash", null, null, null];
+// [label, type] for non-CEX known entities; nulls = unlabeled fresh wallet.
+const OTHER_LABELS: ([string, LabelType] | null)[] = [
+  ["Uniswap Router", "dex"],
+  ["Wormhole", "bridge"],
+  ["Jito", "staking"],
+  null, null, null,
+];
 
 // Typical native-asset transfer sizes, so ETH looks like ETH and BTC like BTC.
 function baseAmount(rnd: () => number, chain: ChainInfo): number {
@@ -130,53 +137,63 @@ function baseAmount(rnd: () => number, chain: ChainInfo): number {
   return +(scale * (0.1 + rnd() * 3)).toFixed(chain.nativeAsset === "BTC" ? 4 : 3);
 }
 
-export function mockWalletOutflows(wallet: string, chain: ChainInfo): WalletOutflows {
+interface MockParty {
+  addr: string;
+  label: string | null;
+  labelType: LabelType | null;
+  isExchange: boolean;
+}
+
+export function mockWalletTransfers(wallet: string, chain: ChainInfo): WalletTransfers {
   const rnd = seeded(wallet + chain.id);
   const now = 1_720_000_000; // fixed "today" so mock output is stable
   const spanDays = 20 + Math.floor(rnd() * 40);
   const firstSeenUnix = now - spanDays * 86400;
 
-  const recipientCount = 6 + Math.floor(rnd() * 9); // 6-14 distinct sinks
+  const partyCount = 6 + Math.floor(rnd() * 9); // 6-14 distinct counterparties
   const exPool = EXCHANGES[chain.family] ?? EXCHANGES.evm;
 
-  // Build the recipient set first: a few labeled entities, the rest fresh wallets.
-  const recipients = Array.from({ length: recipientCount }, () => {
+  // Build the counterparty set: a few labeled entities, the rest fresh wallets.
+  const parties: MockParty[] = Array.from({ length: partyCount }, () => {
     const addr = chainAddress(rnd, chain);
     const roll = rnd();
     if (roll < 0.35) {
-      const label = exPool[Math.floor(rnd() * exPool.length)];
-      return { addr, label, isExchange: true };
+      return { addr, label: exPool[Math.floor(rnd() * exPool.length)], labelType: "cex", isExchange: true };
     }
     if (roll < 0.5) {
-      const label = OTHER_LABELS[Math.floor(rnd() * OTHER_LABELS.length)];
-      return { addr, label, isExchange: false };
+      const pick = OTHER_LABELS[Math.floor(rnd() * OTHER_LABELS.length)];
+      return { addr, label: pick?.[0] ?? null, labelType: pick?.[1] ?? null, isExchange: false };
     }
-    return { addr, label: null as string | null, isExchange: false };
+    return { addr, label: null, labelType: null, isExchange: false };
   });
 
-  // One recipient often dominates (a consolidation / cash-out sink).
-  const dominantIdx = Math.floor(rnd() * recipients.length);
+  // One counterparty often dominates outflow (a consolidation / cash-out sink).
+  const dominantIdx = Math.floor(rnd() * parties.length);
 
-  const transferCount = recipientCount + Math.floor(rnd() * 30);
+  const transferCount = partyCount + Math.floor(rnd() * 30);
   const transfers: Transfer[] = [];
   let lastSeenUnix = firstSeenUnix;
 
   for (let i = 0; i < transferCount; i++) {
     // Weight some transfers toward the dominant sink to create concentration.
-    const idx = rnd() < 0.4 ? dominantIdx : Math.floor(rnd() * recipients.length);
-    const r = recipients[idx];
-    const mult = idx === dominantIdx ? 1.5 + rnd() * 3 : 0.3 + rnd() * 1.5;
+    const idx = rnd() < 0.4 ? dominantIdx : Math.floor(rnd() * parties.length);
+    const p = parties[idx];
+    // ~35% inbound, ~65% outbound — most tracer subjects are net spenders.
+    const direction: "in" | "out" = rnd() < 0.35 ? "in" : "out";
+    const mult = idx === dominantIdx && direction === "out" ? 1.5 + rnd() * 3 : 0.3 + rnd() * 1.5;
     const amount = +(baseAmount(rnd, chain) * mult).toFixed(chain.nativeAsset === "BTC" ? 4 : 3);
     const unixTime = firstSeenUnix + Math.floor(rnd() * spanDays * 86400);
     lastSeenUnix = Math.max(lastSeenUnix, unixTime);
     transfers.push({
-      to: r.addr,
+      direction,
+      counterparty: p.addr,
       amount,
       asset: chain.nativeAsset,
       unixTime,
       signature: fakeSignature(rnd, chain),
-      toLabel: r.label,
-      isExchange: r.isExchange,
+      counterpartyLabel: p.label,
+      labelType: p.labelType,
+      isExchange: p.isExchange,
     });
   }
 
@@ -205,12 +222,16 @@ export function mockWalletHoldings(wallet: string, chain: ChainInfo): WalletHold
     chain.nativeAsset === "SOL" ? 150 :
     chain.nativeAsset === "BTC" ? 65000 :
     chain.nativeAsset === "BNB" ? 600 : 1;
-  const symbols = ["USDC", "JUP", "BONK", "WIF", "PEPE", "PYTH", "JTO", "RAY"];
+  const tokenMeta: [string, string][] = [
+    ["USDC", "USD Coin"], ["JUP", "Jupiter"], ["BONK", "Bonk"], ["WIF", "dogwifhat"],
+    ["PEPE", "Pepe"], ["PYTH", "Pyth Network"], ["JTO", "Jito"], ["RAY", "Raydium"],
+  ];
   const tokenCount = Math.floor(rnd() * 5); // 0-4 tokens
   const tokens: TokenHolding[] = Array.from({ length: tokenCount }, () => {
+    const [symbol, name] = tokenMeta[Math.floor(rnd() * tokenMeta.length)];
     const amount = +(rnd() * 5000).toFixed(2);
     const usd = +(amount * (0.01 + rnd() * 3)).toFixed(2);
-    return { mint: chainAddress(rnd, chain), symbol: symbols[Math.floor(rnd() * symbols.length)], amount, usd };
+    return { mint: chainAddress(rnd, chain), symbol, name, amount, usd };
   }).sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0));
   return {
     nativeBalance,

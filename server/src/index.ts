@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { getTokenActivity, getWalletOutflows, getWalletHoldings } from "./data/index.ts";
+import { getTokenActivity, getWalletTransfers, getWalletHoldings } from "./data/index.ts";
 import { buildReport } from "./signals.ts";
 import { buildFlowReport } from "./flow.ts";
 import { narrate, narrateFlow } from "./narrate.ts";
@@ -32,12 +32,12 @@ app.post("/trace", async (c) => {
     return c.json({ error: "Enter a valid wallet address." }, 400);
   }
   try {
-    const outflows = await getWalletOutflows(wallet.trim(), chainId);
-    const report = buildFlowReport(outflows);
+    const walletTransfers = await getWalletTransfers(wallet.trim(), chainId);
+    const report = buildFlowReport(walletTransfers);
     // Narrate and fetch current holdings in parallel — they're independent.
     const [narrated, holdings] = await Promise.all([
       narrateFlow(report),
-      getWalletHoldings(outflows.wallet, outflows.chain).catch((e) => {
+      getWalletHoldings(walletTransfers.wallet, walletTransfers.chain).catch((e) => {
         console.error("holdings fetch failed:", e);
         return undefined; // holdings are best-effort; don't fail the whole trace
       }),

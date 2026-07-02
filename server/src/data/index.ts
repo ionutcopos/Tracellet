@@ -1,6 +1,6 @@
-import type { TokenActivity, WalletOutflows, WalletHoldings, ChainInfo } from "../types.ts";
-import { mockTokenActivity, mockWalletOutflows, mockWalletHoldings } from "./mock.ts";
-import { liveWalletOutflows, liveWalletHoldings } from "./live.ts";
+import type { TokenActivity, WalletTransfers, WalletHoldings, ChainInfo } from "../types.ts";
+import { mockTokenActivity, mockWalletTransfers, mockWalletHoldings } from "./mock.ts";
+import { liveWalletTransfers, liveWalletHoldings } from "./live.ts";
 import { CHAINS, detectChain } from "../chains.ts";
 // import { heliusTokenActivity } from "./helius.ts";
 
@@ -17,10 +17,10 @@ export async function getTokenActivity(mint: string): Promise<TokenActivity> {
 // every EVM chain shares one address format, so a 0x… address is ambiguous and
 // the UI lets the user pick (defaulting to Ethereum). If omitted, we detect from
 // the address format.
-export async function getWalletOutflows(
+export async function getWalletTransfers(
   wallet: string,
   chainId?: string,
-): Promise<WalletOutflows> {
+): Promise<WalletTransfers> {
   const chain = chainId ? CHAINS[chainId] : detectChain(wallet);
   if (!chain) {
     throw new Error("UNKNOWN_CHAIN");
@@ -28,12 +28,12 @@ export async function getWalletOutflows(
   // Solana is wired to live Helius data; other chains still use mock until their
   // adapters land in live.ts. This is the swap point — one line per chain.
   if (chain.family === "solana") {
-    return liveWalletOutflows(wallet, chain);
+    return liveWalletTransfers(wallet, chain);
   }
-  return mockWalletOutflows(wallet, chain);
+  return mockWalletTransfers(wallet, chain);
 }
 
-// Current holdings (balance + tokens). Same swap pattern as outflows. Takes an
+// Current holdings (balance + tokens). Same swap pattern as transfers. Takes an
 // already-resolved chain (the route detects once and passes it to both calls).
 export async function getWalletHoldings(wallet: string, chain: ChainInfo): Promise<WalletHoldings> {
   if (chain.family === "solana") {

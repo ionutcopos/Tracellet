@@ -47,6 +47,8 @@ export async function narrate(r: TokenReport): Promise<TokenReport> {
       body: JSON.stringify({
         model: MODEL,
         temperature: 0.2,
+        max_tokens: 320,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -74,14 +76,14 @@ export async function narrate(r: TokenReport): Promise<TokenReport> {
 function flowTemplate(r: FlowReport): { summary: string; concentration: "low" | "medium" | "high" } {
   const c = concentrationVerdict(r);
   const asset = r.chain.nativeAsset;
-  const top = r.recipients[0];
-  const topLabel = top?.label ?? (top ? `${top.recipient.slice(0, 6)}…` : "n/a");
+  const top = r.counterparties[0];
+  const topLabel = top?.label ?? (top ? `${top.counterparty.slice(0, 6)}…` : "n/a");
   const cashedPct = r.totalOut > 0 ? Math.round((r.exchangeOut / r.totalOut) * 100) : 0;
   const summary =
-    `${r.totalOut} ${asset} left this wallet across ${r.transferCount} transfers to ` +
-    `${r.recipientCount} destinations on ${r.chain.name}. The largest sink (${topLabel}) ` +
-    `took ${r.topRecipientPct}% of outflow; ${cashedPct}% reached known exchanges. ` +
-    `Concentration: ${c}.`;
+    `${r.totalOut} ${asset} left this wallet and ${r.totalIn} ${asset} came in, across ` +
+    `${r.transferCount} transfers with ${r.counterpartyCount} counterparties on ${r.chain.name}. ` +
+    `The largest outflow sink (${topLabel}) took ${r.topRecipientPct}%; ${cashedPct}% reached ` +
+    `known exchanges. Concentration: ${c}.`;
   return { summary, concentration: c };
 }
 
@@ -95,21 +97,24 @@ export async function narrateFlow(r: FlowReport): Promise<FlowReport> {
   const baseline = concentrationVerdict(r);
   const system =
     "You are an on-chain fund-flow analyst. You will receive a JSON report of a " +
-    "wallet's already-computed OUTBOUND transfers, aggregated by recipient, on a " +
-    "specific blockchain. Do NOT invent any numbers or addresses — only use values " +
-    "present in the JSON, and always state amounts in the chain's nativeAsset. Write " +
-    "a 3-4 sentence plain-language account of where this wallet's money went (top " +
-    "destinations, how concentrated, how much reached exchanges / mixers), then give " +
-    "a concentration verdict of low, medium, or high. A heuristic baseline is provided; " +
-    "agree or override it, but if you override, say why. Respond ONLY as JSON: " +
-    '{"summary": string, "concentration": "low"|"medium"|"high"}. No markdown, no preamble.';
+    "wallet's already-computed transfers, aggregated by counterparty (with outAmount " +
+    "and inAmount per counterparty), on a specific blockchain. Do NOT invent any " +
+    "numbers or addresses — only use values present in the JSON, and always state " +
+    "amounts in the chain's nativeAsset. Write a 3-4 sentence plain-language account " +
+    "of where this wallet's money went and came from (top counterparties, how " +
+    "concentrated the outflow is, how much reached exchanges / mixers), then give a " +
+    "concentration verdict of low, medium, or high. A heuristic baseline is provided; " +
+    "agree or override it, but if you override, say why. Keep the summary tight: at " +
+    "most 3 sentences and under 70 words, and never repeat a point. Respond ONLY as " +
+    'JSON: {"summary": string, "concentration": "low"|"medium"|"high"}. No markdown.';
 
-  // Trim to the top recipients AND drop each recipient's individual-transfer list
-  // (`txs`) — the narration only needs the aggregates, and the per-tx arrays can be
-  // hundreds of entries, which bloats the prompt and breaks the response.
+  // Trim to the top counterparties AND drop the heavy arrays (`txs`, `allTransfers`)
+  // — the narration only needs aggregates. Per-tx arrays can be hundreds of entries,
+  // which bloats the prompt and breaks the response (JSON.parse of empty content).
+  const { allTransfers, ...head } = r;
   const compact = {
-    ...r,
-    recipients: r.recipients.slice(0, 12).map(({ txs, ...rest }) => rest),
+    ...head,
+    counterparties: r.counterparties.slice(0, 12).map(({ txs, ...rest }) => rest),
   };
   const user = JSON.stringify({ baseline, report: compact });
 
@@ -120,6 +125,8 @@ export async function narrateFlow(r: FlowReport): Promise<FlowReport> {
       body: JSON.stringify({
         model: MODEL,
         temperature: 0.2,
+        max_tokens: 320,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
