@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body {
+  margin: 0;
+  background: #0d0d0d;
+  /* subtle radial lift behind the app, blue→violet, barely there */
+  background-image:
+    radial-gradient(60rem 40rem at 50% -10rem, rgba(57,135,229,0.10), transparent 70%),
+    radial-gradient(50rem 30rem at 85% 0, rgba(144,133,233,0.06), transparent 70%);
+  background-attachment: fixed;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0d0d0d; }
+::-webkit-scrollbar-thumb { background: #2c2c2a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a37; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

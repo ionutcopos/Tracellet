@@ -1,0 +1,10 @@
+{
+  "name": "tracellet-server",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.12.27"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/stranger/.bun/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(command -v bun deno)",
+      "Read(//Users/stranger/**)",
+      "Bash(curl -fsSL https://bun.sh/install)",
+      "Bash(bash)",
+      "Bash(~/.bun/bin/bun --version)",
+      "Skill(dataviz)",
+      "Bash(rm -rf '{server,web')",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
