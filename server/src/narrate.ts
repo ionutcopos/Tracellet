@@ -114,7 +114,12 @@ export async function narrateFlow(r: FlowReport): Promise<FlowReport> {
   const { allTransfers, ...head } = r;
   const compact = {
     ...head,
-    counterparties: r.counterparties.slice(0, 12).map(({ txs, ...rest }) => rest),
+    // drop the heavy tx arrays; blank out unconfirmed (protocol-context) labels so
+    // the model doesn't assert an identity we haven't verified.
+    counterparties: r.counterparties.slice(0, 12).map(({ txs, ...rest }) => ({
+      ...rest,
+      label: rest.labelConfident ? rest.label : null,
+    })),
   };
   const user = JSON.stringify({ baseline, report: compact });
 

@@ -24,6 +24,7 @@ interface CounterpartyFlow {
   counterparty: string;
   label: string | null;
   labelType: LabelType | null;
+  labelConfident: boolean;
   isExchange: boolean;
   outAmount: number;
   inAmount: number;
@@ -47,6 +48,7 @@ interface Transfer {
   signature: string | null;
   counterpartyLabel: string | null;
   labelType: LabelType | null;
+  labelConfident: boolean;
   isExchange: boolean;
 }
 interface TokenHolding {
@@ -489,6 +491,20 @@ function TypeChip({ type }: { type: LabelType }) {
   );
 }
 
+// Shown when a label is only protocol *context* (seen via pump.fun/…), not a verified
+// identity — the counterparty is a plain wallet, so we mark it "?label".
+function UncertainChip({ label }: { label: string }) {
+  return (
+    <span
+      title={`Seen in ${label} transactions, but this address is a regular wallet — not a confirmed ${label} account.`}
+      className="text-[9px] px-1.5 py-0.5 rounded tracking-wide"
+      style={{ color: C.muted, background: `${C.muted}14`, border: `1px solid ${C.muted}33` }}
+    >
+      ?{label}
+    </span>
+  );
+}
+
 // A directional flow bar: out (blue) and in (aqua). In "both" view it's split.
 function FlowBar({ c, view, maxAmt }: { c: CounterpartyFlow; view: View; maxAmt: number }) {
   const scale = (v: number) => (v / maxAmt) * 100;
@@ -519,7 +535,7 @@ function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: Co
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               {canExpand && <span className="text-[9px] transition-transform" style={{ color: C.muted, transform: open ? "rotate(90deg)" : "none" }}>▶</span>}
-              {c.label ? (
+              {c.label && c.labelConfident ? (
                 <span className="text-sm font-medium truncate" style={{ color: C.ink }}>{c.label}</span>
               ) : (
                 <span className="text-sm truncate" style={{ color: C.ink2, fontFamily: "'JetBrains Mono', monospace" }}>{short(c.counterparty)}</span>
@@ -527,7 +543,8 @@ function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: Co
               <a href={`${chain.explorerAddr}${c.counterparty}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={`View ${short(c.counterparty)} on explorer`} className="shrink-0" style={{ color: C.blue }}>
                 <ExtIcon />
               </a>
-              {c.labelType && <TypeChip type={c.labelType} />}
+              {c.label && c.labelConfident && c.labelType && <TypeChip type={c.labelType} />}
+              {c.label && !c.labelConfident && <UncertainChip label={c.label} />}
               {c.flags.map((f) => (
                 <span key={f} title={FLAG_STYLE[f]?.title} className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ color: FLAG_STYLE[f]?.color ?? C.muted, background: `${FLAG_STYLE[f]?.color ?? C.muted}14` }}>{f}</span>
               ))}
@@ -601,8 +618,8 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
           const inner = (
             <>
               <span className="w-3" style={{ color: dirColor }}>{t.direction === "out" ? "↑" : "↓"}</span>
-              <span className="truncate flex-1" style={{ color: t.counterpartyLabel ? C.ink2 : C.muted, fontFamily: t.counterpartyLabel ? "inherit" : "'JetBrains Mono', monospace" }}>
-                {t.counterpartyLabel ?? short(t.counterparty)}
+              <span className="truncate flex-1" style={{ color: t.counterpartyLabel && t.labelConfident ? C.ink2 : C.muted, fontFamily: t.counterpartyLabel && t.labelConfident ? "inherit" : "'JetBrains Mono', monospace" }}>
+                {t.counterpartyLabel && t.labelConfident ? t.counterpartyLabel : short(t.counterparty)}
               </span>
               <span className="shrink-0" style={{ color: dirColor }}>{t.direction === "out" ? "−" : "+"}{fmt(t.amount)} {t.asset}</span>
               <span className="w-20 text-right shrink-0" style={{ color: C.muted }}>{day(t.unixTime)}</span>
@@ -645,7 +662,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
 
   const laid = nodes.map((c, i) => {
     const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
-    const label = (c.label ?? short(c.counterparty)).slice(0, 16);
+    const label = (c.label && c.labelConfident ? c.label : short(c.counterparty)).slice(0, 16);
     return {
       c, i, label,
       x: cx + Math.cos(ang) * rx,
@@ -664,7 +681,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
         <div className="ml-auto flex items-center gap-3 text-[10px]" style={{ color: C.muted }}>
           {hn ? (
             <span style={{ color: C.ink2 }}>
-              {hn.c.label ?? short(hn.c.counterparty)} · <span style={{ color: C.blue }}>↑{fmt(hn.c.outAmount)}</span> · <span style={{ color: C.aqua }}>↓{fmt(hn.c.inAmount)}</span> {asset} · {hn.c.txCount} tx
+              {hn.c.label && hn.c.labelConfident ? hn.c.label : short(hn.c.counterparty)} · <span style={{ color: C.blue }}>↑{fmt(hn.c.outAmount)}</span> · <span style={{ color: C.aqua }}>↓{fmt(hn.c.inAmount)}</span> {asset} · {hn.c.txCount} tx
             </span>
           ) : (
             <>

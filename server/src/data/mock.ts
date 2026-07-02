@@ -193,6 +193,7 @@ export function mockWalletTransfers(wallet: string, chain: ChainInfo): WalletTra
       signature: fakeSignature(rnd, chain),
       counterpartyLabel: p.label,
       labelType: p.labelType,
+      labelConfident: true, // mock labels are curated-style
       isExchange: p.isExchange,
     });
   }

@@ -82,6 +82,9 @@ export interface Transfer {
   // human label for the counterparty if it's a known entity (exchange, bridge…)
   counterpartyLabel: string | null;
   labelType: LabelType | null;
+  // false = the label is only a protocol *context* (seen via pump.fun/…), not a
+  // confirmed identity — the counterparty is a plain wallet. UI shows it as "?label".
+  labelConfident: boolean;
   isExchange: boolean;       // counterparty is a known CEX
 }
 
@@ -109,6 +112,7 @@ export interface CounterpartyFlow {
   counterparty: string;
   label: string | null;
   labelType: LabelType | null;
+  labelConfident: boolean; // false = protocol-context guess, not a confirmed identity
   isExchange: boolean;
   outAmount: number;     // total sent TO this counterparty (native units)
   inAmount: number;      // total received FROM this counterparty

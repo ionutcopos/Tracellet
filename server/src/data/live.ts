@@ -7,7 +7,11 @@ import { entityLabel, sourceLabel, isExchangeType, type Label } from "../labels.
 // other families are stubbed with their provider plan.
 
 const HELIUS_BASE = "https://api.helius.xyz/v0";
+const HELIUS_RPC_BASE = "https://mainnet.helius-rpc.com";
 const LAMPORTS_PER_SOL = 1_000_000_000;
+// A personal wallet's account is owned by the System Program; protocol accounts
+// (bonding curves, pools, fee vaults) are owned by their program.
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
 // Real wallets are noisy. Outbound native transfers below this are rent-exemption
 // deposits (~0.00204 SOL for a token account), fee dust, and tip crumbs — NOT
@@ -53,8 +57,11 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
         if (!counterparty) continue;
         const sol = nt.amount / LAMPORTS_PER_SOL;
         if (sol < DUST_SOL) continue; // drop rent/fee noise
-        // Tier 1: curated entity label. Tier 2: protocol the transfer flowed through.
-        const meta: Label | null = entityLabel("solana", counterparty) ?? sourceLabel(tx.source);
+        // Tier 1: curated entity label (confident). Tier 2: protocol context from the
+        // tx `source` — NOT a confirmed identity yet, so labelConfident starts false
+        // and is verified against the on-chain account owner below.
+        const entity = entityLabel("solana", counterparty);
+        const meta: Label | null = entity ?? sourceLabel(tx.source);
         transfers.push({
           direction: out ? "out" : "in",
           counterparty,
@@ -64,6 +71,7 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
           signature: tx.signature,
           counterpartyLabel: meta?.label ?? null,
           labelType: meta?.type ?? null,
+          labelConfident: entity != null, // curated = confident; source = verify below
           isExchange: isExchangeType(meta?.type ?? null),
         });
       }
@@ -78,6 +86,22 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
     return { wallet, chain, firstSeenUnix: now, lastSeenUnix: now, transfers: [] };
   }
 
+  // Verify source-derived labels: a real protocol account is program-owned; a plain
+  // wallet is owned by the System Program. Only confirm the label for the former.
+  const toVerify = [...new Set(
+    transfers.filter((t) => t.counterpartyLabel && !t.labelConfident).map((t) => t.counterparty),
+  )];
+  if (toVerify.length) {
+    const owners = await heliusOwners(toVerify, key);
+    for (const t of transfers) {
+      if (t.counterpartyLabel && !t.labelConfident) {
+        const owner = owners.get(t.counterparty);
+        // program-owned (owner exists and isn't the System Program) => confirmed
+        if (owner && owner !== SYSTEM_PROGRAM) t.labelConfident = true;
+      }
+    }
+  }
+
   transfers.sort((a, b) => a.unixTime - b.unixTime);
   return {
     wallet,
@@ -86,6 +110,28 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
     lastSeenUnix: transfers[transfers.length - 1].unixTime,
     transfers,
   };
+}
+
+// Look up the on-chain owner program of each account (batched, 100 per RPC call).
+// Returns address -> owner (or null if the account doesn't exist on chain).
+async function heliusOwners(addresses: string[], key: string): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  for (let i = 0; i < addresses.length; i += 100) {
+    const chunk = addresses.slice(i, i + 100);
+    const res = await fetch(`${HELIUS_RPC_BASE}/?api-key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: "owners", method: "getMultipleAccounts",
+        params: [chunk, { encoding: "base64" }],
+      }),
+    });
+    if (!res.ok) { chunk.forEach((a) => out.set(a, null)); continue; }
+    const json = (await res.json()) as { result?: { value?: ({ owner?: string } | null)[] } };
+    const value = json.result?.value ?? [];
+    chunk.forEach((a, j) => out.set(a, value[j]?.owner ?? null));
+  }
+  return out;
 }
 
 // ---- Current holdings: SOL balance + fungible tokens (Helius DAS) ----
@@ -230,6 +276,7 @@ async function evmWalletTransfers(wallet: string, chain: ChainInfo, key: string)
       signature: t.hash,
       counterpartyLabel: meta?.label ?? null,
       labelType: meta?.type ?? null,
+      labelConfident: meta != null, // EVM labels are curated → confident
       isExchange: isExchangeType(meta?.type ?? null),
     });
   };

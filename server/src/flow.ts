@@ -35,6 +35,7 @@ export function buildFlowReport(o: WalletTransfers): FlowReport {
         counterparty: t.counterparty,
         label: t.counterpartyLabel,
         labelType: t.labelType,
+        labelConfident: t.labelConfident,
         isExchange: t.isExchange,
         outAmount: 0, inAmount: 0, netAmount: 0, totalAmount: 0,
         outTxCount: 0, inTxCount: 0, txCount: 0,
@@ -59,7 +60,8 @@ export function buildFlowReport(o: WalletTransfers): FlowReport {
     c.lastUnix = Math.max(c.lastUnix, t.unixTime);
     c.txs.push({ direction: t.direction, amount: t.amount, unixTime: t.unixTime, signature: t.signature });
     // keep a label/type if any transfer to/from this counterparty had one
-    if (!c.label && t.counterpartyLabel) { c.label = t.counterpartyLabel; c.labelType = t.labelType; }
+    if (!c.label && t.counterpartyLabel) { c.label = t.counterpartyLabel; c.labelType = t.labelType; c.labelConfident = t.labelConfident; }
+    if (t.counterpartyLabel && t.labelConfident) c.labelConfident = true; // any confirmed leg confirms it
     if (t.isExchange) c.isExchange = true;
   }
 
