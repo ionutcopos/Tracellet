@@ -398,7 +398,7 @@ export default function App() {
         )}
 
         <footer className="mt-12 text-[11px] text-center" style={{ color: C.muted }}>
-          Code computes the flow · AI narrates it · Solana is live via Helius, other chains on mock
+          Code computes the flow · AI narrates it · Solana + EVM live, other chains on mock
         </footer>
       </div>
     </div>

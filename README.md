@@ -28,7 +28,8 @@ so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
    → Tron.) All EVM chains share one address format, so a `0x…` address defaults to
    Ethereum with a chain selector in the UI.
 3. The backend fetches the wallet's transfers — **both directions** — plus its current
-   holdings. Solana is live via Helius; other chains run on a mock layer for now.
+   holdings. **Solana (Helius) and EVM (Etherscan) are live**; Bitcoin and Tron run on
+   a mock layer for now.
 4. **`buildFlowReport()`** — the pure engine — aggregates by counterparty (out/in
    amounts, net, per-direction tx counts), computes concentration and exchange
    cash-out, and raises flags (`cash-out`, `single-large`, `repeated`, `mixer`).
@@ -67,10 +68,10 @@ gracefully without them — a template summary stands in for the LLM.
 
 ## Going live (mock → real data)
 
-All chain data lives behind one interface in `server/src/data/index.ts`. Solana is
-already wired to Helius in `server/src/data/live.ts`; the remaining families follow the
-same shape (Etherscan/Alchemy for EVM, a UTXO indexer for Bitcoin, TronGrid for Tron) —
-the engine and frontend don't change.
+All chain data lives behind one interface in `server/src/data/index.ts`. Solana
+(Helius) and EVM (Etherscan V2 — one key covers Ethereum/Base/Arbitrum/Polygon/BSC)
+are wired in `server/src/data/live.ts`; the remaining families follow the same shape
+(a UTXO indexer for Bitcoin, TronGrid for Tron) — the engine and frontend don't change.
 
 ## How AI was used building this
 

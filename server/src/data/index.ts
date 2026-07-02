@@ -25,9 +25,9 @@ export async function getWalletTransfers(
   if (!chain) {
     throw new Error("UNKNOWN_CHAIN");
   }
-  // Solana is wired to live Helius data; other chains still use mock until their
-  // adapters land in live.ts. This is the swap point — one line per chain.
-  if (chain.family === "solana") {
+  // Solana (Helius) and EVM (Etherscan) are live; other chains still use mock until
+  // their adapters land in live.ts. This is the swap point — one branch per family.
+  if (chain.family === "solana" || chain.family === "evm") {
     return liveWalletTransfers(wallet, chain);
   }
   return mockWalletTransfers(wallet, chain);
@@ -36,7 +36,7 @@ export async function getWalletTransfers(
 // Current holdings (balance + tokens). Same swap pattern as transfers. Takes an
 // already-resolved chain (the route detects once and passes it to both calls).
 export async function getWalletHoldings(wallet: string, chain: ChainInfo): Promise<WalletHoldings> {
-  if (chain.family === "solana") {
+  if (chain.family === "solana" || chain.family === "evm") {
     return liveWalletHoldings(wallet, chain);
   }
   return mockWalletHoldings(wallet, chain);

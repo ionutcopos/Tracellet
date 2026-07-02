@@ -164,15 +164,116 @@ async function heliusSolanaHoldings(wallet: string, key: string): Promise<Wallet
   };
 }
 
-// Per-family plan for the chains not yet wired:
-//   evm     -> Etherscan-family `txlist`+`tokentx`, or Alchemy/Covalent multichain
-//   bitcoin -> mempool.space / Blockstream (filter change outputs back to sender)
-//   tron    -> TronGrid /v1/accounts/{addr}/transactions
+// ---- EVM: native ETH/POL/BNB transfers + balance (Etherscan V2 unified API) ----
+// One key works across all EVM chains; the chain is selected by `chainid`. We read
+// both external (`txlist`) and internal (`txlistinternal`) transactions so contract-
+// mediated value (DEX payouts, withdrawals) is counted, not just direct sends.
+
+const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
+const WEI_PER_ETH = 1e18;
+const EVM_CHAIN_IDS: Record<string, number> = {
+  ethereum: 1, base: 8453, arbitrum: 42161, polygon: 137, bsc: 56,
+};
+const EVM_MAX_ROWS = 2000; // most recent N txs per list
+
+interface EtherscanTx {
+  hash: string;
+  timeStamp: string;
+  from: string;
+  to: string;
+  value: string; // wei
+  isError?: string;
+}
+
+async function etherscanList(chainId: number, action: string, wallet: string, key: string): Promise<EtherscanTx[]> {
+  const url =
+    `${ETHERSCAN_V2}?chainid=${chainId}&module=account&action=${action}&address=${wallet}` +
+    `&startblock=0&endblock=99999999&page=1&offset=${EVM_MAX_ROWS}&sort=desc&apikey=${key}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Etherscan API error ${res.status}`);
+  const j = (await res.json()) as { status: string; message: string; result: EtherscanTx[] | string };
+  if (Array.isArray(j.result)) return j.result;
+  // status "0" with a "No transactions found" message is a normal empty result.
+  if (/no transactions/i.test(j.message ?? "")) return [];
+  throw new Error(`Etherscan: ${typeof j.result === "string" ? j.result : j.message}`);
+}
+
+async function evmWalletTransfers(wallet: string, chain: ChainInfo, key: string): Promise<WalletTransfers> {
+  const chainId = EVM_CHAIN_IDS[chain.id];
+  if (!chainId) throw new Error(`no Etherscan chainid for ${chain.id}`);
+  const w = wallet.toLowerCase();
+
+  const [ext, internal] = await Promise.all([
+    etherscanList(chainId, "txlist", wallet, key),
+    etherscanList(chainId, "txlistinternal", wallet, key),
+  ]);
+
+  const transfers: Transfer[] = [];
+  const add = (t: EtherscanTx) => {
+    if (t.isError === "1") return;
+    const val = Number(t.value) / WEI_PER_ETH;
+    if (!(val > 0)) return; // skip 0-value contract calls (approvals etc.)
+    const from = (t.from ?? "").toLowerCase();
+    const to = (t.to ?? "").toLowerCase();
+    const out = from === w;
+    const inbound = to === w;
+    if (out === inbound) return; // skip self / unrelated
+    const counterparty = out ? t.to : t.from;
+    if (!counterparty) return;
+    const meta: Label | null = entityLabel("evm", counterparty.toLowerCase());
+    transfers.push({
+      direction: out ? "out" : "in",
+      counterparty,
+      amount: +val.toFixed(6),
+      asset: chain.nativeAsset,
+      unixTime: Number(t.timeStamp),
+      signature: t.hash,
+      counterpartyLabel: meta?.label ?? null,
+      labelType: meta?.type ?? null,
+      isExchange: isExchangeType(meta?.type ?? null),
+    });
+  };
+  ext.forEach(add);
+  internal.forEach(add);
+
+  if (transfers.length === 0) {
+    const now = Math.floor(Date.now() / 1000);
+    return { wallet, chain, firstSeenUnix: now, lastSeenUnix: now, transfers: [] };
+  }
+  transfers.sort((a, b) => a.unixTime - b.unixTime);
+  return {
+    wallet, chain,
+    firstSeenUnix: transfers[0].unixTime,
+    lastSeenUnix: transfers[transfers.length - 1].unixTime,
+    transfers,
+  };
+}
+
+async function evmHoldings(wallet: string, chain: ChainInfo, key: string): Promise<WalletHoldings> {
+  const chainId = EVM_CHAIN_IDS[chain.id];
+  if (!chainId) throw new Error(`no Etherscan chainid for ${chain.id}`);
+  const url = `${ETHERSCAN_V2}?chainid=${chainId}&module=account&action=balance&address=${wallet}&tag=latest&apikey=${key}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Etherscan API error ${res.status}`);
+  const j = (await res.json()) as { result: string };
+  const nativeBalance = +(Number(j.result) / WEI_PER_ETH).toFixed(6);
+  // ERC-20 token holdings need a token-balance list (Etherscan Pro) — not on free
+  // tier, so we report native balance only for now.
+  return { nativeBalance, nativeAsset: chain.nativeAsset, nativeUsd: null, tokenCount: 0, nftCount: 0, tokens: [] };
+}
+
+// ---- dispatch ----
+
 export async function liveWalletTransfers(wallet: string, chain: ChainInfo): Promise<WalletTransfers> {
   if (chain.family === "solana") {
     const key = process.env.HELIUS_API_KEY;
     if (!key) throw new Error("HELIUS_API_KEY is not set");
     return heliusSolanaTransfers(wallet, chain, key);
+  }
+  if (chain.family === "evm") {
+    const key = process.env.ETHERSCAN_API_KEY;
+    if (!key) throw new Error("ETHERSCAN_API_KEY is not set");
+    return evmWalletTransfers(wallet, chain, key);
   }
   throw new Error(`live data not implemented for ${chain.family} — see live.ts`);
 }
@@ -182,6 +283,11 @@ export async function liveWalletHoldings(wallet: string, chain: ChainInfo): Prom
     const key = process.env.HELIUS_API_KEY;
     if (!key) throw new Error("HELIUS_API_KEY is not set");
     return heliusSolanaHoldings(wallet, key);
+  }
+  if (chain.family === "evm") {
+    const key = process.env.ETHERSCAN_API_KEY;
+    if (!key) throw new Error("ETHERSCAN_API_KEY is not set");
+    return evmHoldings(wallet, chain, key);
   }
   throw new Error(`live holdings not implemented for ${chain.family} — see live.ts`);
 }

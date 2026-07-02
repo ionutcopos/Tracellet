@@ -9,19 +9,23 @@ import { dirname, join } from "node:path";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const URL = "http://localhost:5173/";
-const WALLET = "HFFyTn7YjPWg2ctT1pgmnB585vWXPUmt4bnTrmCr2uKz"; // live Solana
+const SOLANA = "HFFyTn7YjPWg2ctT1pgmnB585vWXPUmt4bnTrmCr2uKz"; // live Solana
+const ETH = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";     // live EVM (vitalik.eth)
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "screenshots");
 mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
 
-await page.goto(URL, { waitUntil: "networkidle" });
-await page.fill('input[placeholder^="Paste any wallet"]', WALLET);
-await page.click('button:has-text("Trace")');
-await page.waitForSelector("text=total out", { timeout: 45000 });
-await page.waitForTimeout(1500);
+async function trace(wallet) {
+  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.fill('input[placeholder^="Paste any wallet"]', wallet);
+  await page.click('button:has-text("Trace")');
+  await page.waitForSelector("text=total out", { timeout: 45000 });
+  await page.waitForTimeout(1500);
+}
 
+await trace(SOLANA);
 await page.screenshot({ path: join(OUT, "tracellet-flow.png"), fullPage: true });
 console.log("· wrote tracellet-flow.png");
 
@@ -29,5 +33,9 @@ await page.click('button:has-text("In & Out")');
 await page.waitForTimeout(500);
 await page.screenshot({ path: join(OUT, "tracellet-in-out.png"), fullPage: true });
 console.log("· wrote tracellet-in-out.png");
+
+await trace(ETH);
+await page.screenshot({ path: join(OUT, "tracellet-evm.png"), fullPage: true });
+console.log("· wrote tracellet-evm.png");
 
 await browser.close();
