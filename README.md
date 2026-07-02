@@ -4,15 +4,19 @@
 
 # Tracellet — Trace the Wallet
 
-Paste any wallet address and see **where its money went**: every outbound transfer,
-aggregated by recipient, ranked by amount, with how concentrated the outflow is and
-how much of it cashed out to exchanges. Multi-chain — the chain is detected from the
-address format, so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
+Paste any wallet address and follow its money **in and out**: every transfer,
+aggregated by counterparty, ranked, with entity labels, current holdings, and a
+plain-language summary. Multi-chain — the chain is detected from the address format,
+so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
+
+<p align="center">
+  <img src="docs/screenshots/tracellet-flow.png" alt="Tracellet tracing a Solana wallet" width="760">
+</p>
 
 > **Design principle:** *Code decides, AI narrates.* The chain is classified by a
-> deterministic regex (not the LLM), and every number — totals, per-recipient sums,
-> concentration — is computed in a pure engine. The LLM only receives that clean
-> structured JSON and turns it into a plain-language summary. It never sees raw
+> deterministic regex (not the LLM), and every number — totals, per-counterparty
+> sums, concentration — is computed in a pure engine. The LLM only receives that
+> clean structured JSON and turns it into a plain-language summary. It never sees raw
 > chain data and is told to quote fields verbatim, which keeps the analysis testable
 > and the AI honest.
 
@@ -23,45 +27,50 @@ address format, so the same tool works for Ethereum, Solana, Bitcoin, Tron and m
    instant, no LLM. (`0x…` → EVM, base58 → Solana, `bc1…`/`1…`/`3…` → Bitcoin, `T…`
    → Tron.) All EVM chains share one address format, so a `0x…` address defaults to
    Ethereum with a chain selector in the UI.
-3. Backend fetches the wallet's outbound transfers (mock data now, live adapters later)
-4. **`buildFlowReport()`** — the pure engine — aggregates by recipient and computes
-   totals, per-recipient share, concentration, exchange cash-out, and flags
-   (`cash-out`, `single-large`, `repeated`, `mixer`)
-5. Groq (Llama) narrates the structured report into a summary + concentration verdict
-6. Dashboard shows the stat tiles, AI summary, and a ranked "where the money went"
-   flow with proportional bars
+3. The backend fetches the wallet's transfers — **both directions** — plus its current
+   holdings. Solana is live via Helius; other chains run on a mock layer for now.
+4. **`buildFlowReport()`** — the pure engine — aggregates by counterparty (out/in
+   amounts, net, per-direction tx counts), computes concentration and exchange
+   cash-out, and raises flags (`cash-out`, `single-large`, `repeated`, `mixer`).
+5. Entity labels turn raw addresses into names — a curated, verified address map plus
+   the protocol each transfer flowed through (pump.fun, Jupiter, Raydium…).
+6. Groq (Llama) narrates the structured report into a short summary + concentration
+   verdict.
+7. The dashboard shows stat tiles, the AI summary, current holdings (balance + tokens
+   + NFTs), and a ranked counterparty flow you can toggle **Out / In / In & Out**,
+   re-rank, drill into per-transaction, and expand to every transaction — each row
+   linking out to the chain's explorer.
 
 ## Stack
 
 - **Frontend:** React + Vite + Tailwind (dark, minimal, blue→violet accent)
 - **Backend:** Bun + Hono
-- **Data:** mock layer behind a `getWalletOutflows(wallet, chainId?)` interface
+- **Data:** live adapters (Helius for Solana) + a mock layer, behind one
+  `getWalletTransfers(wallet, chainId?)` interface
 - **LLM:** Groq (free tier, Llama)
 
 ## Run
 
 ```bash
-# backend
-cd server && bun install && bun run dev      # http://localhost:3000
-
-# frontend (separate terminal)
-cd web && bun install && bun run dev          # http://localhost:5173
+./scripts/dev.sh                 # starts both servers, prints URLs
+./scripts/trace.sh <wallet>      # quick report from the API
 ```
 
-Set `GROQ_API_KEY` in `server/.env` to enable AI narration. Without it, the app
-falls back to a template summary so the UI still works.
+Keys live in `server/.env` (see `.env.example`): `GROQ_API_KEY` (AI narration),
+`HELIUS_API_KEY` (live Solana), `ETHERSCAN_API_KEY` (live EVM). The app degrades
+gracefully without them — a template summary stands in for the LLM.
 
 ## Endpoints
 
 - `POST /detect { wallet }` → detected chain + selectable options (EVM is ambiguous)
-- `POST /trace { wallet, chainId? }` → the full `FlowReport` (with AI summary)
+- `POST /trace { wallet, chainId? }` → the full `FlowReport` (transfers, holdings, AI summary)
 
 ## Going live (mock → real data)
 
-All chain data lives behind one interface in `server/src/data/index.ts`. Implement
-the per-chain adapters in `server/src/data/live.ts` (stub included, with the provider
-plan per chain: Etherscan/Alchemy for EVM, Helius for Solana, a UTXO indexer for
-Bitcoin, TronGrid for Tron) — the engine and frontend don't change.
+All chain data lives behind one interface in `server/src/data/index.ts`. Solana is
+already wired to Helius in `server/src/data/live.ts`; the remaining families follow the
+same shape (Etherscan/Alchemy for EVM, a UTXO indexer for Bitcoin, TronGrid for Tron) —
+the engine and frontend don't change.
 
 ## How AI was used building this
 
@@ -78,4 +87,4 @@ Bitcoin, TronGrid for Tron) — the engine and frontend don't change.
   told to quote fields verbatim and never invent numbers — the fix that stopped the
   model hallucinating figures.
 
-See `DEVLOG.md` for the running log.
+See `DEVLOG.md` for the running log and `HANDOFF.md` for current state.
