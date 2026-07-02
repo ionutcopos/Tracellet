@@ -38,9 +38,10 @@ so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
 6. Groq (Llama) narrates the structured report into a short summary + concentration
    verdict.
 7. The dashboard shows stat tiles, the AI summary, current holdings (balance + tokens
-   + NFTs), and a ranked counterparty flow you can toggle **Out / In / In & Out**,
-   re-rank, drill into per-transaction, and expand to every transaction — each row
-   linking out to the chain's explorer.
+   + NFTs), a **money-flow map** (wallet-centered network graph, edges weighted by
+   amount and colored by direction), and a ranked counterparty flow you can toggle
+   **Out / In / In & Out**, re-rank, drill into per-transaction, and expand to every
+   transaction — each row linking out to the chain's explorer.
 
 ## Stack
 

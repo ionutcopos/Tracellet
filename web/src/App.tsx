@@ -345,6 +345,9 @@ export default function App() {
 
             {report.holdings && <HoldingsPanel h={report.holdings} chain={report.chain} />}
 
+            {/* money-flow network graph */}
+            <FlowGraph report={report} view={view} />
+
             {/* counterparty flow */}
             <div className="rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-3 justify-between">
@@ -620,6 +623,94 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
           + load {Math.min(100, filtered.length - limit)} more
         </button>
       )}
+    </div>
+  );
+}
+
+// The money-flow map: wallet at the center, top counterparties around it, edges
+// weighted by amount and colored by direction (blue = out, aqua = in). Not bubbles.
+function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const amountOf = (c: CounterpartyFlow) => (view === "out" ? c.outAmount : view === "in" ? c.inAmount : c.totalAmount);
+  const nodes = useMemo(
+    () => report.counterparties.filter((c) => amountOf(c) > 0).sort((a, b) => amountOf(b) - amountOf(a)).slice(0, 12),
+    [report, view],
+  );
+  if (nodes.length === 0) return null;
+
+  const W = 820, H = 460, cx = W / 2, cy = H / 2, rx = 330, ry = 175;
+  const maxA = Math.max(...nodes.map(amountOf));
+  const asset = report.chain.nativeAsset;
+  const edgeColor = (c: CounterpartyFlow) => (view === "in" ? C.aqua : view === "out" ? C.blue : c.outAmount >= c.inAmount ? C.blue : C.aqua);
+
+  const laid = nodes.map((c, i) => {
+    const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+    const label = (c.label ?? short(c.counterparty)).slice(0, 16);
+    return {
+      c, i, label,
+      x: cx + Math.cos(ang) * rx,
+      y: cy + Math.sin(ang) * ry,
+      w: 1.5 + Math.sqrt(amountOf(c) / maxA) * 7,
+      color: edgeColor(c),
+      pw: Math.max(58, label.length * 7 + 20),
+    };
+  });
+  const hn = hover != null ? laid[hover] : null;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: C.card, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center gap-3 mb-1 px-1">
+        <span className="text-[10px] tracking-widest uppercase" style={{ color: C.muted }}>Money-flow map</span>
+        <div className="ml-auto flex items-center gap-3 text-[10px]" style={{ color: C.muted }}>
+          {hn ? (
+            <span style={{ color: C.ink2 }}>
+              {hn.c.label ?? short(hn.c.counterparty)} · <span style={{ color: C.blue }}>↑{fmt(hn.c.outAmount)}</span> · <span style={{ color: C.aqua }}>↓{fmt(hn.c.inAmount)}</span> {asset} · {hn.c.txCount} tx
+            </span>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: C.blue }} /> out</span>
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: C.aqua }} /> in</span>
+            </>
+          )}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} onMouseLeave={() => setHover(null)}>
+        {/* edges */}
+        {laid.map((n) => (
+          <line
+            key={`e${n.i}`}
+            x1={cx} y1={cy} x2={n.x} y2={n.y}
+            stroke={n.color}
+            strokeWidth={hover === n.i ? n.w + 1.5 : n.w}
+            strokeLinecap="round"
+            opacity={hover == null ? 0.5 : hover === n.i ? 0.95 : 0.15}
+          />
+        ))}
+        {/* counterparty nodes */}
+        {laid.map((n) => (
+          <a key={`n${n.i}`} href={`${report.chain.explorerAddr}${n.c.counterparty}`} target="_blank" rel="noopener noreferrer">
+            <g
+              onMouseEnter={() => setHover(n.i)}
+              style={{ cursor: "pointer" }}
+              opacity={hover == null || hover === n.i ? 1 : 0.4}
+            >
+              <rect x={n.x - n.pw / 2} y={n.y - 12} width={n.pw} height={24} rx={12} fill="#191920" stroke={n.color} strokeWidth={1} />
+              <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize={11} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">{n.label}</text>
+            </g>
+          </a>
+        ))}
+        {/* center wallet node */}
+        <defs>
+          <linearGradient id="wgrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor={C.blue} />
+            <stop offset="1" stopColor={C.violet} />
+          </linearGradient>
+        </defs>
+        <rect x={cx - 52} y={cy - 15} width={104} height={30} rx={15} fill="#101014" stroke="url(#wgrad)" strokeWidth={1.6} />
+        <text x={cx} y={cy + 4} textAnchor="middle" fontSize={12} fontWeight={700} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">
+          {short(report.wallet)}
+        </text>
+      </svg>
     </div>
   );
 }
