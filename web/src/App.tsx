@@ -137,6 +137,26 @@ const RANK_OPTIONS = [
 ] as const;
 type RankBy = (typeof RANK_OPTIONS)[number]["id"];
 
+// Counterparty category, used by the filter chips. "individual" = a plain wallet
+// (no confirmed entity label), i.e. an actual person/address rather than a bot,
+// exchange, or protocol.
+type Category = "individual" | "cex" | "dex" | "defi" | "mixer";
+const CATEGORY_ORDER: Category[] = ["individual", "cex", "dex", "defi", "mixer"];
+const CATEGORY_META: Record<Category, { label: string; color: string }> = {
+  individual: { label: "Individuals", color: C.ink2 },
+  cex: { label: "CEX", color: C.good },
+  dex: { label: "DEX", color: C.blue },
+  defi: { label: "DeFi", color: C.violet },
+  mixer: { label: "Mixers", color: C.critical },
+};
+function categoryOf(c: CounterpartyFlow): Category {
+  if (c.flags.includes("mixer")) return "mixer";
+  if (!c.label || !c.labelConfident) return "individual"; // no confirmed entity = a wallet
+  if (c.labelType === "cex") return "cex";
+  if (c.labelType === "dex") return "dex";
+  return "defi"; // bridge / staking / program / burn
+}
+
 const MAX_ROWS = 30;
 
 function short(w: string) {
@@ -173,6 +193,9 @@ export default function App() {
   const [rankBy, setRankBy] = useState<RankBy>("amount");
   const [showAll, setShowAll] = useState(false);
   const [showTxPanel, setShowTxPanel] = useState(false);
+  const [hidden, setHidden] = useState<Set<Category>>(new Set());
+  const toggleCategory = (cat: Category) =>
+    setHidden((h) => { const n = new Set(h); n.has(cat) ? n.delete(cat) : n.add(cat); return n; });
 
   useEffect(() => {
     const w = wallet.trim();
@@ -206,6 +229,7 @@ export default function App() {
     setReport(null);
     setShowAll(false);
     setShowTxPanel(false);
+    setHidden(new Set());
     try {
       const res = await fetch(`${API}/trace`, {
         method: "POST",
@@ -226,16 +250,29 @@ export default function App() {
   const exchangePct = report && report.totalOutUsd > 0 ? Math.round((report.exchangeOutUsd / report.totalOutUsd) * 100) : 0;
 
   const usdOf = (c: CounterpartyFlow) => (view === "out" ? c.outUsd : view === "in" ? c.inUsd : c.totalUsd);
+
+  // Direction-filtered candidates (all categories) — drives the category chip counts.
+  const dirList = useMemo(
+    () => (report ? report.counterparties.filter((c) => usdOf(c) > 0) : []),
+    [report, view],
+  );
+  const catCounts = useMemo(() => {
+    const m = new Map<Category, number>();
+    for (const c of dirList) m.set(categoryOf(c), (m.get(categoryOf(c)) ?? 0) + 1);
+    return m;
+  }, [dirList]);
+
+  // Then apply the category filter and the ranking.
+  const filtered = useMemo(() => dirList.filter((c) => !hidden.has(categoryOf(c))), [dirList, hidden]);
   const visible = useMemo(() => {
-    if (!report) return [];
-    const list = report.counterparties.filter((c) => usdOf(c) > 0);
+    const list = [...filtered];
     list.sort((a, b) => {
       if (rankBy === "txCount") return b.txCount - a.txCount;
       if (rankBy === "recent") return b.lastUnix - a.lastUnix;
       return usdOf(b) - usdOf(a);
     });
     return list;
-  }, [report, view, rankBy]);
+  }, [filtered, view, rankBy]);
 
   const maxUsd = visible.length ? Math.max(...visible.map(usdOf)) : 1;
   const totalForPct = view === "out" ? report?.totalOutUsd : view === "in" ? report?.totalInUsd : (report ? report.totalOutUsd + report.totalInUsd : 0);
@@ -343,7 +380,7 @@ export default function App() {
 
             {report.holdings && <HoldingsPanel h={report.holdings} chain={report.chain} />}
 
-            <FlowGraph report={report} view={view} />
+            <FlowGraph candidates={filtered} view={view} chain={report.chain} wallet={report.wallet} />
 
             <div className="rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-3 justify-between">
@@ -358,13 +395,31 @@ export default function App() {
                   </div>
                 </div>
               </div>
+              {catCounts.size > 1 && (
+                <div className="px-5 pb-3 flex flex-wrap items-center gap-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <span className="text-[10px] uppercase tracking-widest mr-1" style={{ color: C.muted }}>show</span>
+                  {CATEGORY_ORDER.filter((cat) => catCounts.has(cat)).map((cat) => {
+                    const meta = CATEGORY_META[cat];
+                    const off = hidden.has(cat);
+                    return (
+                      <button key={cat} onClick={() => toggleCategory(cat)} title={off ? `Show ${meta.label}` : `Hide ${meta.label}`} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full transition-opacity" style={{ border: `1px solid ${off ? C.line : `${meta.color}55`}`, background: off ? "transparent" : `${meta.color}14`, color: off ? C.muted : meta.color, opacity: off ? 0.55 : 1 }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: meta.color, opacity: off ? 0.4 : 1 }} />
+                        <span style={{ textDecoration: off ? "line-through" : "none" }}>{meta.label}</span>
+                        <span style={{ color: C.muted }}>{catCounts.get(cat)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div>
                 {shown.map((c, i) => (
                   <CounterpartyRow key={c.counterparty} c={c} rank={i + 1} view={view} maxUsd={maxUsd} total={totalForPct || 1} chain={report.chain} />
                 ))}
                 {visible.length === 0 && (
                   <div className="px-5 py-6 text-sm text-center" style={{ color: C.muted }}>
-                    No {view === "in" ? "inbound" : view === "out" ? "outbound" : ""} transfers found.
+                    {dirList.length === 0
+                      ? `No ${view === "in" ? "inbound" : view === "out" ? "outbound" : ""} transfers found.`
+                      : "No counterparties match the selected categories."}
                   </div>
                 )}
               </div>
@@ -625,12 +680,12 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
 // Wallet-centered money-flow map, in the spirit of the logo: one source node fanning
 // out along curved branches to counterparty dots — each dot sized by USD volume and
 // colored by direction (blue = out, aqua = in).
-function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
+function FlowGraph({ candidates, view, chain, wallet }: { candidates: CounterpartyFlow[]; view: View; chain: ChainInfo; wallet: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const usdOf = (c: CounterpartyFlow) => (view === "out" ? c.outUsd : view === "in" ? c.inUsd : c.totalUsd);
   const nodes = useMemo(
-    () => report.counterparties.filter((c) => usdOf(c) > 0).sort((a, b) => usdOf(b) - usdOf(a)).slice(0, 12),
-    [report, view],
+    () => [...candidates].sort((a, b) => usdOf(b) - usdOf(a)).slice(0, 12),
+    [candidates, view],
   );
   if (nodes.length === 0) return null;
 
@@ -692,7 +747,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
           const lx = n.x + n.ux * (n.rad + 6);
           const ly = n.y + n.uy * (n.rad + 6) + (Math.abs(n.uy) > 0.6 ? (n.uy > 0 ? 9 : -3) : 4);
           return (
-            <a key={`n${n.i}`} href={`${report.chain.explorerAddr}${n.c.counterparty}`} target="_blank" rel="noopener noreferrer">
+            <a key={`n${n.i}`} href={`${chain.explorerAddr}${n.c.counterparty}`} target="_blank" rel="noopener noreferrer">
               <g onMouseEnter={() => setHover(n.i)} style={{ cursor: "pointer" }} opacity={hover == null || hover === n.i ? 1 : 0.4}>
                 <circle cx={n.x} cy={n.y} r={hover === n.i ? n.rad + 2 : n.rad} fill={n.color} stroke={C.card} strokeWidth={1.5} />
                 <text x={lx} y={ly} textAnchor={anchor} fontSize={10.5} fill={C.ink2} fontFamily="'Space Grotesk', sans-serif">{n.label}</text>
@@ -703,7 +758,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
         {/* source: the wallet, a bigger gradient dot */}
         <circle cx={cx} cy={cy} r={14} fill="url(#wgrad)" />
         <circle cx={cx} cy={cy} r={14} fill="none" stroke={C.card} strokeWidth={2} />
-        <text x={cx} y={cy + 30} textAnchor="middle" fontSize={11} fontWeight={700} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">{short(report.wallet)}</text>
+        <text x={cx} y={cy + 30} textAnchor="middle" fontSize={11} fontWeight={700} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">{short(wallet)}</text>
       </svg>
     </div>
   );
