@@ -59,8 +59,9 @@ array (hundreds of entries) was going into the LLM prompt, which broke the respo
 - [ ] Bitcoin (UTXO indexer) + Tron (TronGrid) live adapters.
 - [ ] ERC-20 holdings list for EVM; historical (at-tx) pricing.
 - [ ] Real exchange labels from a dataset so "to exchanges" is fully populated.
-- [ ] Unit tests for `flow.ts` and `chains.ts`.
 - [ ] Optional: multi-hop tracing ("follow it through layers").
+
+The pure engine (`flow.ts`) and classifier (`chains.ts`) have unit tests — `cd server && bun test` (26 tests). They're the load-bearing correctness code, so they're the part worth testing.
 
 ## Notes to self
 
