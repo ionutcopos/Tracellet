@@ -1,73 +1,70 @@
 # DEVLOG
 
-Running log of how this was built and where AI was used. The point of keeping this
-is to show *judgment* — what got delegated, what got reviewed by hand, and why.
+Running log of how Tracellet was built and where AI was used. The point is to show
+*judgment* — what got delegated, what got reviewed by hand, and why.
 
-## Day 1 — scaffold
+## The thesis: code decides, AI narrates
 
-- **Delegated:** initial project structure (Hono routes, Vite setup, Tailwind
-  config, mock data generator). Reviewed and kept mostly as-is.
-- **Written/reviewed by hand:** the signal engine (`signals.ts`). This is the part
-  that has to be correct, so I read every line. Snipe window, hold-time, PnL, and
-  funded-together grouping are all deterministic and unit-checkable.
-- **Design decision I made, not the AI:** the LLM never sees raw RPC data. It only
-  receives the already-computed `TokenReport` JSON and is told to quote fields
-  verbatim. First draft let the model reason over raw trades and it started
-  inventing numbers — locking it to structured input fixed that. That constraint is
-  the whole "code decides, AI narrates" thesis of the project.
-- **Verified:** signal engine is deterministic (same mint → same output) and the
-  analyze pipeline runs end-to-end with the template fallback (no API key needed).
+Anything that must be correct is deterministic code; the LLM only writes prose over
+numbers that are already computed. It never sees raw chain data and is told to quote
+fields verbatim — an early draft that let the model reason over raw transactions started
+inventing figures, and locking it to structured input fixed that. This principle drove
+every architectural call below.
 
-## Day 2 — pivot to Tracellet (wallet fund-flow tracer)
+## Chain detection is code, not the model
 
-Reframed the product around a sharper question: **"where did this wallet's money
-go?"** Same architecture, new pipeline.
+`chains.ts` `detectChain()` classifies the chain from the address format with a regex —
+EVM, Solana, Bitcoin, Tron. An address's chain is a fingerprint, so an LLM here would be
+slower, cost a call, and occasionally be wrong on the one step everything else depends
+on. Honest constraint handled in the UI: every EVM chain shares one address format, so a
+`0x…` address defaults to Ethereum with a chain selector.
 
-- **New product, same thesis.** The token-analyzer became a multi-chain wallet
-  fund-flow tracer: input a wallet → its outbound transfers aggregated by recipient,
-  ranked, with concentration + exchange cash-out signals. The old token view is
-  dropped from the UI (backend `signals.ts` left intact).
-- **Multi-chain via deterministic detection.** `chains.ts` `detectChain()` classifies
-  the chain from the address format with a regex — Ethereum/EVM, Solana, Bitcoin,
-  Tron. The LLM does *not* do this: an address's chain is a fingerprint, so code is
-  faster, free, and reliable. Honest constraint handled in the UI: all EVM chains
-  share one address format, so `0x…` defaults to Ethereum with a chain selector.
-- **Written/reviewed by hand:** the pure engine `flow.ts` (`buildFlowReport`) and the
-  classifier `chains.ts`. Delegated the mock generator and the React view, then
-  restyled the view by hand (dark, minimal, blue→violet accent, dataviz-validated).
-- **Verified end-to-end:** `/detect` + `/trace` tested across EVM, Solana, Bitcoin,
-  Tron with live Groq narration; the summary quotes only computed numbers. Frontend
-  screenshotted on Ethereum and Solana traces.
+## The pure engine, reviewed by hand
 
-## Day 3 — live Solana + enrichment
+`flow.ts` (`buildFlowReport`) is the only thing that produces numbers — pure, no I/O, no
+LLM. It aggregates a wallet's transfers (both directions, all assets) by counterparty,
+valued in USD. Written and read by hand; the mock generator and first-pass React view
+were delegated, then the view was restyled by hand (dark, minimal, blue→violet accent,
+dataviz-validated).
 
-- **Live Solana via Helius.** `live.ts` pulls real outbound native-SOL transfers
-  (Enhanced Transactions API, paginated). Key insight from testing against a real
-  pump.fun wallet: raw data is noise-heavy (ATA rent ~0.00204 SOL, fee dust), so a
-  **dust filter (<0.005 SOL)** is what makes the ranking mean anything.
-- **Entity labels (`labels.ts`), two honest tiers:** a tiny curated address map
-  (mislabeling is worse than no label) + protocol context from Helius `source`
-  (PUMP_FUN→pump.fun, JUPITER→Jupiter…). Turns raw addresses into "PumpSwap".
-- **Holdings** (balance + tokens + NFTs) via Helius DAS `getAssetsByOwner`.
-- **Per-recipient drill-down:** `flow.ts` keeps each recipient's individual
-  transfers; the UI expands a row into "Tx 1 = 2.002 SOL…" with per-tx explorer links.
-- **Explorer links** per chain (`explorerAddr`/`explorerTx` on ChainInfo).
-- **Bug I caught by watching the app:** the AI summary silently fell back to the
-  template. Cause: I was sending each recipient's full `txs` array (hundreds of
-  entries) to the LLM, which broke the response → `JSON.parse("")`. Fix: strip
-  `txs` before narration — the model only needs aggregates.
+## Live data (Solana + EVM)
 
-## TODO (next sessions)
+- **Solana (Helius):** real in/out transfers from the Enhanced Transactions API, plus
+  holdings via DAS. Insight from a real pump.fun wallet: raw data is noise-heavy (ATA
+  rent ~0.00204 SOL, fee dust), so a dust filter (<0.005 SOL) is what makes the ranking
+  mean anything.
+- **EVM (Etherscan V2):** native + ERC-20 transfers across Ethereum/Base/Arbitrum/
+  Polygon/BSC — one key, chain selected by `chainid`.
+- **Everything valued in USD** via DeFiLlama's free multi-chain price API, so SOL, USDC,
+  ETH and tokens rank in one list; unpriced/spam tokens (<$1) are dropped.
 
-- [ ] Live EVM data (Etherscan/Alchemy) — next chain after Solana.
-- [ ] Real entity labels from a dataset (Arkham/Solana FM) so "to exchanges" is meaningful.
-- [ ] Count SPL-token outflows (needs price data to value them in SOL terms).
-- [ ] Unit tests for `flow.ts` and `chains.ts` (ambiguous BTC-legacy vs Solana).
-- [ ] Optional: multi-hop tracing ("follow it through layers") as a v2.
+## Entity labels — and verifying them
+
+Two tiers: a small curated address map (a wrong label is worse than none) + protocol
+context from the Helius `source` (PUMP_FUN→pump.fun…). The catch: source-derived labels
+were being stamped on *any* counterparty in those transactions, including plain wallets.
+Fix — verify each against its on-chain account owner: program-owned accounts keep the
+label, System-Program-owned wallets get a muted "?" instead (and the LLM never sees the
+unverified ones). On a test wallet this correctly demoted the top counterparty — a closed
+account that was being mislabeled "PumpSwap".
+
+## A bug caught by watching the app
+
+The AI summary silently fell back to a template. Cause: each counterparty's full transfer
+array (hundreds of entries) was going into the LLM prompt, which broke the response →
+`JSON.parse("")`. Fix: strip the arrays before narration — the model only needs aggregates.
+
+## TODO
+
+- [ ] Bitcoin (UTXO indexer) + Tron (TronGrid) live adapters.
+- [ ] ERC-20 holdings list for EVM; historical (at-tx) pricing.
+- [ ] Real exchange labels from a dataset so "to exchanges" is fully populated.
+- [ ] Unit tests for `flow.ts` and `chains.ts`.
+- [ ] Optional: multi-hop tracing ("follow it through layers").
 
 ## Notes to self
 
-- Keep detection deterministic — it's the load-bearing correctness claim and the
-  thesis in miniature. If it ever needs the LLM, something is wrong.
-- The ranked flow list is the signature view: proportional bars + exchange labels
-  make "where the money went" legible at a glance. Keep it clean.
+- Keep detection deterministic — it's the load-bearing correctness claim. If it ever
+  needs the LLM, something is wrong.
+- The ranked flow list + network map are the signature views: proportional bars and
+  verified labels make "where the money went" legible at a glance. Keep them clean.
