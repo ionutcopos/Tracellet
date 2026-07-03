@@ -4,3 +4,10 @@ dist/
 *.log
 .DS_Store
 .idea/
+
+# Internal working files — kept locally, not part of the public repo.
+HANDOFF.md
+CLAUDE.md
+
+# Raw screen-recording frames (the committed GIF is the artifact).
+docs/screenshots/video/

@@ -4,90 +4,57 @@
 
 # Tracellet — Trace the Wallet
 
-Paste any wallet address and follow its money **in and out**: every transfer,
-aggregated by counterparty, ranked, with entity labels, current holdings, and a
-plain-language summary. Multi-chain — the chain is detected from the address format,
-so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
+Paste any wallet and see exactly where its money went and came from, across Solana and
+Ethereum, native coins and tokens, all valued in USD.
+
+<!-- Live demo: add the link here once deployed -->
 
 <p align="center">
-  <img src="docs/screenshots/tracellet-flow.jpg" alt="Tracellet tracing a Solana wallet" width="760">
+  <img src="docs/screenshots/tracellet-demo.gif" alt="Tracing a Solana wallet end to end" width="760">
 </p>
 
-> **Design principle:** *Code decides, AI narrates.* The chain is classified by a
-> deterministic regex (not the LLM), and every number — totals, per-counterparty
-> sums, concentration — is computed in a pure engine. The LLM only receives that
-> clean structured JSON and turns it into a plain-language summary. It never sees raw
-> chain data and is told to quote fields verbatim, which keeps the analysis testable
-> and the AI honest.
+Most "wallet checkers" show you a balance. Tracellet answers the harder question:
+**follow the money.** It pulls a wallet's full history, groups it by who the funds
+actually moved to and from, prices every transfer in USD so a SOL move and a USDC move
+sit in the same ranked list, verifies the labels it shows, and draws the whole thing as
+a network map. Chain is detected straight from the address — Solana and EVM are live.
 
-## What it does
+## What makes it more than a demo
 
-1. Enter a wallet address
-2. **`detectChain()`** classifies the chain from the address format — deterministic,
-   instant, no LLM. (`0x…` → EVM, base58 → Solana, `bc1…`/`1…`/`3…` → Bitcoin, `T…`
-   → Tron.) All EVM chains share one address format, so a `0x…` address defaults to
-   Ethereum with a chain selector in the UI.
-3. The backend fetches the wallet's transfers — **both directions, native coins AND
-   tokens** — plus its current holdings, and values everything in **USD** via
-   DeFiLlama so SOL, USDC, ETH and arbitrary tokens rank together. **Solana (Helius)
-   and EVM (Etherscan) are live**; Bitcoin and Tron run on a mock layer for now.
-4. **`buildFlowReport()`** — the pure engine — aggregates by counterparty in USD (out/in
-   value, net, per-direction tx counts), computes concentration and exchange cash-out,
-   and raises flags (`cash-out`, `single-large`, `repeated`, `mixer`).
-5. Entity labels turn raw addresses into names — a curated, verified address map plus
-   the protocol each transfer flowed through (pump.fun, Jupiter, Raydium…).
-6. Groq (Llama) narrates the structured report into a short summary + concentration
-   verdict.
-7. The dashboard shows stat tiles, the AI summary, current holdings (balance + tokens
-   + NFTs), a **money-flow map** (wallet-centered network graph, edges weighted by
-   amount and colored by direction), and a ranked counterparty flow you can toggle
-   **Out / In / In & Out**, re-rank, drill into per-transaction, and expand to every
-   transaction — each row linking out to the chain's explorer.
+**It values everything in USD.** Native coins *and* tokens are priced (via DeFiLlama)
+and ranked together, so a wallet that mostly moves stablecoins isn't invisible.
 
-## Stack
+**Labels are verified, not guessed.** A "pump.fun" tag survives only if the
+counterparty's on-chain account is actually program-owned. A plain wallet that happened
+to be in a pump.fun trade shows up as its address with a muted `?` — never a false claim.
 
-- **Frontend:** React + Vite + Tailwind (dark, minimal, blue→violet accent)
-- **Backend:** Bun + Hono
-- **Data:** live adapters (Helius for Solana) + a mock layer, behind one
-  `getWalletTransfers(wallet, chainId?)` interface
-- **LLM:** Groq (free tier, Llama)
+**Code decides, AI narrates.** A deterministic engine computes every number; the language
+model only writes the summary, over figures it can't change. Even the chain is classified
+by a regex, not the model — it's the one step everything depends on.
 
-## Run
+**Both directions, drill-downs, and a flow map.** Toggle money out / in / both, rank by
+USD or by count, expand any counterparty down to its individual transactions, and read it
+all as a wallet-centered graph. Every row links out to the block explorer.
+
+<p align="center">
+  <img src="docs/screenshots/tracellet-in-out.jpg" alt="Money-flow map and in/out view" width="760">
+</p>
+
+## Run it
 
 ```bash
-./scripts/dev.sh                 # starts both servers, prints URLs
-./scripts/trace.sh <wallet>      # quick report from the API
+./scripts/dev.sh                 # both servers — web on :5173, API on :3000
+./scripts/trace.sh <wallet>      # a quick report straight from the API
 ```
 
-Keys live in `server/.env` (see `.env.example`): `GROQ_API_KEY` (AI narration),
-`HELIUS_API_KEY` (live Solana), `ETHERSCAN_API_KEY` (live EVM). The app degrades
-gracefully without them — a template summary stands in for the LLM.
+Needs [Bun](https://bun.sh). Live data uses free API keys in `server/.env` (see
+`.env.example`): Helius for Solana, Etherscan for EVM, Groq for the summary. Without them
+it falls back to mock data and a templated summary, so it still runs end to end.
 
-## Endpoints
+## Under the hood
 
-- `POST /detect { wallet }` → detected chain + selectable options (EVM is ambiguous)
-- `POST /trace { wallet, chainId? }` → the full `FlowReport` (transfers, holdings, AI summary)
+React + Vite + Tailwind on the front, Bun + Hono on the back. Every chain sits behind one
+`getWalletTransfers()` interface — live adapters for Solana and EVM, a mock layer for the
+rest — so the engine and the UI never change when a new chain comes online.
 
-## Going live (mock → real data)
-
-All chain data lives behind one interface in `server/src/data/index.ts`. Solana
-(Helius) and EVM (Etherscan V2 — one key covers Ethereum/Base/Arbitrum/Polygon/BSC)
-are wired in `server/src/data/live.ts`; the remaining families follow the same shape
-(a UTXO indexer for Bitcoin, TronGrid for Tron) — the engine and frontend don't change.
-
-## How AI was used building this
-
-- **Scaffolding & boilerplate:** delegated the initial Hono routes and Vite setup,
-  then reviewed and restructured.
-- **Flow logic:** the aggregation engine (`flow.ts`) and chain classifier
-  (`chains.ts`) were written and reviewed by hand — these are the parts that must be
-  correct, so AI was used for rubber-ducking edge cases (EVM address ambiguity,
-  Bitcoin UTXO change outputs), not authoring.
-- **Deliberate call — chain detection is code, not the LLM:** an address's chain is
-  a format fingerprint, so classifying it with the model would be slower, cost a
-  call, and occasionally be wrong. Keeping it deterministic is the whole thesis.
-- **Prompt design:** the narration prompt is given only the structured report and
-  told to quote fields verbatim and never invent numbers — the fix that stopped the
-  model hallucinating figures.
-
-See `DEVLOG.md` for the running log and `HANDOFF.md` for current state.
+For how it was built, and where AI helped versus where it didn't, see [DEVLOG.md](DEVLOG.md).
