@@ -4,8 +4,9 @@
 
 # Tracellet — Trace the Wallet
 
-Paste any wallet and see exactly where its money went and came from, across Solana and
-Ethereum, native coins and tokens, all valued in USD.
+**Tracellet follows the money through a crypto wallet.** Every wallet on a blockchain
+has a public address and a public transaction history; paste one and Tracellet shows you,
+in plain US dollars, where its money came from, where it went, and who was on the other end.
 
 <!-- Live demo: add the link here once deployed -->
 
@@ -13,11 +14,12 @@ Ethereum, native coins and tokens, all valued in USD.
   <img src="docs/screenshots/tracellet-demo.gif" alt="Tracing a Solana wallet end to end" width="760">
 </p>
 
-Most "wallet checkers" show you a balance. Tracellet answers the harder question:
-**follow the money.** It pulls a wallet's full history, groups it by who the funds
-actually moved to and from, prices every transfer in USD so a SOL move and a USDC move
-sit in the same ranked list, verifies the labels it shows, and draws the whole thing as
-a network map. Chain is detected straight from the address — Solana and EVM are live.
+Most block explorers just show a balance and a raw list of transactions. Tracellet answers
+the harder question — **follow the money** — across Solana and Ethereum, native coins and
+tokens alike. It prices every transfer in USD so a SOL move and a USDC move sit in the same
+ranked list, only keeps a label like "Binance" or "pump.fun" when it can verify it on-chain,
+and draws the whole flow as a map. Chains are detected straight from the address; Solana and
+EVM are live.
 
 ## What makes it more than a demo
 
