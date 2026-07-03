@@ -25,17 +25,20 @@ async function trace(wallet) {
   await page.waitForTimeout(1500);
 }
 
+// JPEG keeps the repo small (the README hero references the .jpg).
+const shot = (name) => ({ path: join(OUT, name), fullPage: true, type: "jpeg", quality: 82 });
+
 await trace(SOLANA);
-await page.screenshot({ path: join(OUT, "tracellet-flow.png"), fullPage: true });
-console.log("· wrote tracellet-flow.png");
+await page.screenshot(shot("tracellet-flow.jpg"));
+console.log("· wrote tracellet-flow.jpg");
 
 await page.click('button:has-text("In & Out")');
 await page.waitForTimeout(500);
-await page.screenshot({ path: join(OUT, "tracellet-in-out.png"), fullPage: true });
-console.log("· wrote tracellet-in-out.png");
+await page.screenshot(shot("tracellet-in-out.jpg"));
+console.log("· wrote tracellet-in-out.jpg");
 
 await trace(ETH);
-await page.screenshot({ path: join(OUT, "tracellet-evm.png"), fullPage: true });
-console.log("· wrote tracellet-evm.png");
+await page.screenshot(shot("tracellet-evm.jpg"));
+console.log("· wrote tracellet-evm.jpg");
 
 await browser.close();
