@@ -37,7 +37,7 @@ USD or by count, expand any counterparty down to its individual transactions, an
 all as a wallet-centered graph. Every row links out to the block explorer.
 
 <p align="center">
-  <img src="docs/screenshots/tracellet-in-out.jpg" alt="Money-flow map and in/out view" width="760">
+  <img src="docs/screenshots/tracellet-evm.jpg" alt="Money-flow map and in/out view" width="760">
 </p>
 
 ## Run it
