@@ -137,6 +137,16 @@ function baseAmount(rnd: () => number, chain: ChainInfo): number {
   return +(scale * (0.1 + rnd() * 3)).toFixed(chain.nativeAsset === "BTC" ? 4 : 3);
 }
 
+// Rough USD price per native asset, for mock USD valuation.
+function mockNativePrice(chain: ChainInfo): number {
+  return chain.nativeAsset === "BTC" ? 65000 :
+    chain.nativeAsset === "ETH" ? 3200 :
+    chain.nativeAsset === "SOL" ? 150 :
+    chain.nativeAsset === "BNB" ? 600 :
+    chain.nativeAsset === "TRX" ? 0.12 :
+    chain.nativeAsset === "POL" ? 0.5 : 1;
+}
+
 interface MockParty {
   addr: string;
   label: string | null;
@@ -181,14 +191,23 @@ export function mockWalletTransfers(wallet: string, chain: ChainInfo): WalletTra
     // ~35% inbound, ~65% outbound — most tracer subjects are net spenders.
     const direction: "in" | "out" = rnd() < 0.35 ? "in" : "out";
     const mult = idx === dominantIdx && direction === "out" ? 1.5 + rnd() * 3 : 0.3 + rnd() * 1.5;
-    const amount = +(baseAmount(rnd, chain) * mult).toFixed(chain.nativeAsset === "BTC" ? 4 : 3);
+    const nativeAmount = +(baseAmount(rnd, chain) * mult).toFixed(chain.nativeAsset === "BTC" ? 4 : 3);
     const unixTime = firstSeenUnix + Math.floor(rnd() * spanDays * 86400);
     lastSeenUnix = Math.max(lastSeenUnix, unixTime);
+    // ~25% of transfers are a stablecoin (USDC) so the mock exercises multi-asset + USD.
+    const usdcAmount = +(nativeAmount * mockNativePrice(chain)).toFixed(2);
+    const isUsdc = rnd() < 0.25;
+    const asset = isUsdc ? "USDC" : chain.nativeAsset;
+    const assetAddress = isUsdc ? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" : null;
+    const amount = isUsdc ? usdcAmount : nativeAmount;
+    const usd = isUsdc ? usdcAmount : usdcAmount; // both paths already in USD terms
     transfers.push({
       direction,
       counterparty: p.addr,
       amount,
-      asset: chain.nativeAsset,
+      asset,
+      assetAddress,
+      usd,
       unixTime,
       signature: fakeSignature(rnd, chain),
       counterpartyLabel: p.label,

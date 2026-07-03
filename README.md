@@ -27,12 +27,13 @@ so the same tool works for Ethereum, Solana, Bitcoin, Tron and more.
    instant, no LLM. (`0x…` → EVM, base58 → Solana, `bc1…`/`1…`/`3…` → Bitcoin, `T…`
    → Tron.) All EVM chains share one address format, so a `0x…` address defaults to
    Ethereum with a chain selector in the UI.
-3. The backend fetches the wallet's transfers — **both directions** — plus its current
-   holdings. **Solana (Helius) and EVM (Etherscan) are live**; Bitcoin and Tron run on
-   a mock layer for now.
-4. **`buildFlowReport()`** — the pure engine — aggregates by counterparty (out/in
-   amounts, net, per-direction tx counts), computes concentration and exchange
-   cash-out, and raises flags (`cash-out`, `single-large`, `repeated`, `mixer`).
+3. The backend fetches the wallet's transfers — **both directions, native coins AND
+   tokens** — plus its current holdings, and values everything in **USD** via
+   DeFiLlama so SOL, USDC, ETH and arbitrary tokens rank together. **Solana (Helius)
+   and EVM (Etherscan) are live**; Bitcoin and Tron run on a mock layer for now.
+4. **`buildFlowReport()`** — the pure engine — aggregates by counterparty in USD (out/in
+   value, net, per-direction tx counts), computes concentration and exchange cash-out,
+   and raises flags (`cash-out`, `single-large`, `repeated`, `mixer`).
 5. Entity labels turn raw addresses into names — a curated, verified address map plus
    the protocol each transfer flowed through (pump.fun, Jupiter, Raydium…).
 6. Groq (Llama) narrates the structured report into a short summary + concentration

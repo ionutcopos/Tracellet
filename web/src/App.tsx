@@ -17,6 +17,8 @@ interface ChainInfo {
 interface CounterpartyTx {
   direction: Direction;
   amount: number;
+  asset: string;
+  usd: number | null;
   unixTime: number;
   signature: string | null;
 }
@@ -26,14 +28,15 @@ interface CounterpartyFlow {
   labelType: LabelType | null;
   labelConfident: boolean;
   isExchange: boolean;
-  outAmount: number;
-  inAmount: number;
-  netAmount: number;
-  totalAmount: number;
+  outUsd: number;
+  inUsd: number;
+  netUsd: number;
+  totalUsd: number;
   outTxCount: number;
   inTxCount: number;
   txCount: number;
   pctOfOut: number;
+  assets: string[];
   firstUnix: number;
   lastUnix: number;
   flags: string[];
@@ -44,6 +47,8 @@ interface Transfer {
   counterparty: string;
   amount: number;
   asset: string;
+  assetAddress: string | null;
+  usd: number | null;
   unixTime: number;
   signature: string | null;
   counterpartyLabel: string | null;
@@ -69,15 +74,15 @@ interface WalletHoldings {
 interface FlowReport {
   wallet: string;
   chain: ChainInfo;
-  totalOut: number;
-  totalIn: number;
-  netTotal: number;
+  totalOutUsd: number;
+  totalInUsd: number;
+  netUsd: number;
   transferCount: number;
   outCount: number;
   inCount: number;
   counterpartyCount: number;
   topRecipientPct: number;
-  exchangeOut: number;
+  exchangeOutUsd: number;
   counterparties: CounterpartyFlow[];
   allTransfers: Transfer[];
   holdings?: WalletHoldings;
@@ -126,7 +131,7 @@ const LABEL_TYPE_STYLE: Record<LabelType, { color: string }> = {
 };
 
 const RANK_OPTIONS = [
-  { id: "amount", label: "amount" },
+  { id: "amount", label: "USD value" },
   { id: "txCount", label: "tx count" },
   { id: "recent", label: "most recent" },
 ] as const;
@@ -139,11 +144,12 @@ function short(w: string) {
 }
 function fmt(n: number) {
   if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
-  return n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 function fmtUsd(n: number | null) {
   if (n == null) return null;
-  return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const digits = n >= 1000 || n === 0 ? 0 : 2;
+  return "$" + n.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 function day(u: number) {
   return new Date(u * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -163,13 +169,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // view controls
   const [view, setView] = useState<View>("out");
   const [rankBy, setRankBy] = useState<RankBy>("amount");
   const [showAll, setShowAll] = useState(false);
   const [showTxPanel, setShowTxPanel] = useState(false);
 
-  // Debounced deterministic chain detection as the user types.
   useEffect(() => {
     const w = wallet.trim();
     setDetect(null);
@@ -219,26 +223,23 @@ export default function App() {
   }
 
   const conc = report?.concentration ? CONC[report.concentration] : null;
-  const asset = report?.chain.nativeAsset ?? "";
-  const exchangePct = report && report.totalOut > 0 ? Math.round((report.exchangeOut / report.totalOut) * 100) : 0;
+  const exchangePct = report && report.totalOutUsd > 0 ? Math.round((report.exchangeOutUsd / report.totalOutUsd) * 100) : 0;
 
-  // Derive the visible counterparty list from the active view + ranking.
-  const activeAmount = (c: CounterpartyFlow) => (view === "out" ? c.outAmount : view === "in" ? c.inAmount : c.totalAmount);
+  const usdOf = (c: CounterpartyFlow) => (view === "out" ? c.outUsd : view === "in" ? c.inUsd : c.totalUsd);
   const visible = useMemo(() => {
     if (!report) return [];
-    const list = report.counterparties.filter((c) => activeAmount(c) > 0);
+    const list = report.counterparties.filter((c) => usdOf(c) > 0);
     list.sort((a, b) => {
       if (rankBy === "txCount") return b.txCount - a.txCount;
       if (rankBy === "recent") return b.lastUnix - a.lastUnix;
-      return activeAmount(b) - activeAmount(a);
+      return usdOf(b) - usdOf(a);
     });
     return list;
   }, [report, view, rankBy]);
 
-  const maxAmt = visible.length ? Math.max(...visible.map(activeAmount)) : 1;
-  const totalForPct = view === "out" ? report?.totalOut : view === "in" ? report?.totalIn : (report ? report.totalOut + report.totalIn : 0);
+  const maxUsd = visible.length ? Math.max(...visible.map(usdOf)) : 1;
+  const totalForPct = view === "out" ? report?.totalOutUsd : view === "in" ? report?.totalInUsd : (report ? report.totalOutUsd + report.totalInUsd : 0);
   const shown = showAll ? visible : visible.slice(0, MAX_ROWS);
-
   const sectionTitle = view === "out" ? "Where the money went" : view === "in" ? "Where the money came from" : "Money in & out";
 
   return (
@@ -253,12 +254,11 @@ export default function App() {
               </span>
             </h1>
             <p className="text-[13px] mt-1" style={{ color: C.muted }}>
-              Trace the wallet — follow the money in and out, on any chain.
+              Trace the wallet — follow the money in and out, valued in USD, on any chain.
             </p>
           </div>
         </header>
 
-        {/* input */}
         <div className="flex gap-2">
           <input
             value={wallet}
@@ -281,7 +281,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* detection chip / chain selector */}
         <div className="mt-2 h-6 flex items-center gap-2 text-xs" style={{ color: C.muted }}>
           {detect && (
             <>
@@ -311,7 +310,6 @@ export default function App() {
 
         {report && (
           <div className="mt-8 space-y-4">
-            {/* wallet + chain line */}
             <div className="flex items-center gap-2 text-xs" style={{ color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>
               <span className="px-2 py-0.5 rounded" style={{ background: "rgba(144,133,233,0.12)", color: C.violet }}>{report.chain.name}</span>
               <a href={`${report.chain.explorerAddr}${report.wallet}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:underline" style={{ color: C.ink2 }}>
@@ -319,10 +317,9 @@ export default function App() {
               </a>
             </div>
 
-            {/* stat tiles */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Tile label="total out"><Amt v={report.totalOut} asset={asset} color={C.blue} /></Tile>
-              <Tile label="total in"><Amt v={report.totalIn} asset={asset} color={C.aqua} /></Tile>
+              <Tile label="total out"><UsdBig v={report.totalOutUsd} color={C.blue} /></Tile>
+              <Tile label="total in"><UsdBig v={report.totalInUsd} color={C.aqua} /></Tile>
               <Tile label="counterparties">
                 <span className="text-2xl font-bold" style={{ color: C.ink }}>{report.counterpartyCount}</span>
                 <span className="text-xs ml-1" style={{ color: C.muted }}>/ {report.transferCount} tx</span>
@@ -333,7 +330,6 @@ export default function App() {
               </Tile>
             </div>
 
-            {/* AI summary */}
             <div className="rounded-lg p-5" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: `linear-gradient(90deg, ${C.blue}, ${C.violet})` }} />
@@ -347,10 +343,8 @@ export default function App() {
 
             {report.holdings && <HoldingsPanel h={report.holdings} chain={report.chain} />}
 
-            {/* money-flow network graph */}
             <FlowGraph report={report} view={view} />
 
-            {/* counterparty flow */}
             <div className="rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-3 justify-between">
                 <span className="text-[10px] tracking-widest uppercase" style={{ color: C.muted }}>{sectionTitle}</span>
@@ -366,7 +360,7 @@ export default function App() {
               </div>
               <div>
                 {shown.map((c, i) => (
-                  <CounterpartyRow key={c.counterparty} c={c} rank={i + 1} view={view} asset={asset} maxAmt={maxAmt} total={totalForPct || 1} chain={report.chain} />
+                  <CounterpartyRow key={c.counterparty} c={c} rank={i + 1} view={view} maxUsd={maxUsd} total={totalForPct || 1} chain={report.chain} />
                 ))}
                 {visible.length === 0 && (
                   <div className="px-5 py-6 text-sm text-center" style={{ color: C.muted }}>
@@ -381,7 +375,6 @@ export default function App() {
               )}
             </div>
 
-            {/* see all transactions */}
             <div className="rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${C.line}` }}>
               <button onClick={() => setShowTxPanel((s) => !s)} className="w-full px-5 py-3 flex items-center justify-between hover:bg-white/[0.02]">
                 <span className="text-[10px] tracking-widest uppercase" style={{ color: C.muted }}>All transactions</span>
@@ -395,7 +388,7 @@ export default function App() {
         {!report && !loading && !error && (
           <div className="mt-8 rounded-lg p-12 text-center" style={{ border: `1px dashed ${C.line}` }}>
             <p className="text-sm" style={{ color: C.muted }}>
-              Paste a wallet address to trace its money in and out.
+              Paste a wallet address to trace its money in and out — native coins and tokens, valued in USD.
               <br />
               Chain is detected automatically — Ethereum, Solana, Bitcoin, Tron and more.
             </p>
@@ -412,13 +405,8 @@ export default function App() {
 
 // ---- pieces ----
 
-function Amt({ v, asset, color }: { v: number; asset: string; color: string }) {
-  return (
-    <>
-      <span className="text-2xl font-bold" style={{ color }}>{fmt(v)}</span>
-      <span className="text-xs ml-1" style={{ color: C.muted }}>{asset}</span>
-    </>
-  );
+function UsdBig({ v, color }: { v: number; color: string }) {
+  return <span className="text-2xl font-bold" style={{ color }}>{fmtUsd(v)}</span>;
 }
 
 function DirectionToggle({ view, setView }: { view: View; setView: (v: View) => void }) {
@@ -433,12 +421,7 @@ function DirectionToggle({ view, setView }: { view: View; setView: (v: View) => 
         const on = view === o.id;
         const accent = o.id === "in" ? C.aqua : o.id === "out" ? C.blue : C.violet;
         return (
-          <button
-            key={o.id}
-            onClick={() => setView(o.id)}
-            className="px-2.5 py-1 text-[11px] font-medium transition-colors"
-            style={{ background: on ? `${accent}22` : "transparent", color: on ? accent : C.muted }}
-          >
+          <button key={o.id} onClick={() => setView(o.id)} className="px-2.5 py-1 text-[11px] font-medium transition-colors" style={{ background: on ? `${accent}22` : "transparent", color: on ? accent : C.muted }}>
             {o.label}
           </button>
         );
@@ -484,47 +467,41 @@ function ExtIcon() {
 
 function TypeChip({ type }: { type: LabelType }) {
   const s = LABEL_TYPE_STYLE[type];
-  return (
-    <span className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ color: s.color, background: `${s.color}14` }}>
-      {type}
-    </span>
-  );
+  return <span className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ color: s.color, background: `${s.color}14` }}>{type}</span>;
 }
 
-// Shown when a label is only protocol *context* (seen via pump.fun/…), not a verified
-// identity — the counterparty is a plain wallet, so we mark it "?label".
 function UncertainChip({ label }: { label: string }) {
   return (
-    <span
-      title={`Seen in ${label} transactions, but this address is a regular wallet — not a confirmed ${label} account.`}
-      className="text-[9px] px-1.5 py-0.5 rounded tracking-wide"
-      style={{ color: C.muted, background: `${C.muted}14`, border: `1px solid ${C.muted}33` }}
-    >
+    <span title={`Seen in ${label} transactions, but this address is a regular wallet — not a confirmed ${label} account.`} className="text-[9px] px-1.5 py-0.5 rounded tracking-wide" style={{ color: C.muted, background: `${C.muted}14`, border: `1px solid ${C.muted}33` }}>
       ?{label}
     </span>
   );
 }
 
-// A directional flow bar: out (blue) and in (aqua). In "both" view it's split.
-function FlowBar({ c, view, maxAmt }: { c: CounterpartyFlow; view: View; maxAmt: number }) {
-  const scale = (v: number) => (v / maxAmt) * 100;
+function AssetsHint({ assets }: { assets: string[] }) {
+  if (assets.length === 0) return null;
+  const text = assets.length > 2 ? `${assets.slice(0, 2).join(" · ")} +${assets.length - 2}` : assets.join(" · ");
+  return <span className="text-[10px]" style={{ color: C.muted }}>{text}</span>;
+}
+
+function FlowBar({ c, view, maxUsd }: { c: CounterpartyFlow; view: View; maxUsd: number }) {
+  const scale = (v: number) => (v / maxUsd) * 100;
   return (
     <div className="mt-2 ml-7 h-[6px] rounded-full overflow-hidden flex gap-px" style={{ background: C.track }}>
-      {(view === "out" || view === "both") && c.outAmount > 0 && (
-        <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, scale(c.outAmount))}%`, background: `linear-gradient(90deg, ${C.blue}, ${C.violet})` }} />
+      {(view === "out" || view === "both") && c.outUsd > 0 && (
+        <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, scale(c.outUsd))}%`, background: `linear-gradient(90deg, ${C.blue}, ${C.violet})` }} />
       )}
-      {(view === "in" || view === "both") && c.inAmount > 0 && (
-        <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, scale(c.inAmount))}%`, background: C.aqua }} />
+      {(view === "in" || view === "both") && c.inUsd > 0 && (
+        <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, scale(c.inUsd))}%`, background: C.aqua }} />
       )}
     </div>
   );
 }
 
-function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: CounterpartyFlow; rank: number; view: View; asset: string; maxAmt: number; total: number; chain: ChainInfo }) {
+function CounterpartyRow({ c, rank, view, maxUsd, total, chain }: { c: CounterpartyFlow; rank: number; view: View; maxUsd: number; total: number; chain: ChainInfo }) {
   const [open, setOpen] = useState(false);
-  const amount = view === "out" ? c.outAmount : view === "in" ? c.inAmount : c.totalAmount;
-  const pct = total > 0 ? +((amount / total) * 100).toFixed(1) : 0;
-  // drill-down txs filtered by the active view
+  const usd = view === "out" ? c.outUsd : view === "in" ? c.inUsd : c.totalUsd;
+  const pct = total > 0 ? +((usd / total) * 100).toFixed(1) : 0;
   const txs = view === "both" ? c.txs : c.txs.filter((t) => t.direction === view);
   const canExpand = txs.length > 0;
   return (
@@ -545,23 +522,23 @@ function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: Co
               </a>
               {c.label && c.labelConfident && c.labelType && <TypeChip type={c.labelType} />}
               {c.label && !c.labelConfident && <UncertainChip label={c.label} />}
+              <AssetsHint assets={c.assets} />
               {c.flags.map((f) => (
                 <span key={f} title={FLAG_STYLE[f]?.title} className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ color: FLAG_STYLE[f]?.color ?? C.muted, background: `${FLAG_STYLE[f]?.color ?? C.muted}14` }}>{f}</span>
               ))}
             </div>
           </div>
           <div className="text-right shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
-            <span className="text-sm font-semibold" style={{ color: C.ink }}>{fmt(amount)}</span>
-            <span className="text-[11px] ml-1" style={{ color: C.muted }}>{asset}</span>
+            <span className="text-sm font-semibold" style={{ color: C.ink }}>{fmtUsd(usd)}</span>
             <span className="text-[11px] ml-2" style={{ color: C.muted }}>{pct}%</span>
             {view === "both" && (
               <div className="text-[10px]" style={{ color: C.muted }}>
-                <span style={{ color: C.blue }}>↑{fmt(c.outAmount)}</span> · <span style={{ color: C.aqua }}>↓{fmt(c.inAmount)}</span>
+                <span style={{ color: C.blue }}>↑{fmtUsd(c.outUsd)}</span> · <span style={{ color: C.aqua }}>↓{fmtUsd(c.inUsd)}</span>
               </div>
             )}
           </div>
         </div>
-        <FlowBar c={c} view={view} maxAmt={maxAmt} />
+        <FlowBar c={c} view={view} maxUsd={maxUsd} />
       </div>
 
       {open && (
@@ -570,7 +547,7 @@ function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: Co
             {txs.length} transfer{txs.length > 1 ? "s" : ""} · {dateRange(c.firstUnix, c.lastUnix)}
           </div>
           <div className="space-y-1">
-            {txs.slice(0, 20).map((t, i) => <TxRow key={i} t={t} idx={i} asset={asset} chain={chain} />)}
+            {txs.slice(0, 20).map((t, i) => <TxRow key={i} t={t} idx={i} chain={chain} />)}
             {txs.length > 20 && <div className="text-[10px] px-2 pt-1" style={{ color: C.muted }}>+ {txs.length - 20} more transfers</div>}
           </div>
         </div>
@@ -579,14 +556,15 @@ function CounterpartyRow({ c, rank, view, asset, maxAmt, total, chain }: { c: Co
   );
 }
 
-function TxRow({ t, idx, asset, chain }: { t: CounterpartyTx; idx: number; asset: string; chain: ChainInfo }) {
+function TxRow({ t, idx, chain }: { t: CounterpartyTx; idx: number; chain: ChainInfo }) {
   const dirColor = t.direction === "out" ? C.blue : C.aqua;
   const inner = (
     <>
       <span style={{ color: dirColor }}>{t.direction === "out" ? "↑" : "↓"}</span>
       <span style={{ color: C.muted }}>Tx {idx + 1}</span>
-      <span className="ml-auto" style={{ color: C.ink }}>{fmt(t.amount)} {asset}</span>
-      <span className="w-20 text-right" style={{ color: C.muted }}>{day(t.unixTime)}</span>
+      <span className="ml-auto" style={{ color: C.ink }}>{fmt(t.amount)} {t.asset}</span>
+      <span className="w-16 text-right" style={{ color: C.muted }}>{fmtUsd(t.usd) ?? "—"}</span>
+      <span className="w-16 text-right" style={{ color: C.muted }}>{day(t.unixTime)}</span>
       {t.signature && <span style={{ color: C.blue }}><ExtIcon /></span>}
     </>
   );
@@ -603,7 +581,7 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
   const [limit, setLimit] = useState(50);
   const filtered = useMemo(() => {
     const list = view === "both" ? transfers : transfers.filter((t) => t.direction === view);
-    return [...list].sort((a, b) => b.unixTime - a.unixTime); // most recent first
+    return [...list].sort((a, b) => b.unixTime - a.unixTime);
   }, [transfers, view]);
   const rows = filtered.slice(0, limit);
   return (
@@ -615,14 +593,14 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
       <div>
         {rows.map((t, i) => {
           const dirColor = t.direction === "out" ? C.blue : C.aqua;
+          const name = t.counterpartyLabel && t.labelConfident ? t.counterpartyLabel : short(t.counterparty);
           const inner = (
             <>
               <span className="w-3" style={{ color: dirColor }}>{t.direction === "out" ? "↑" : "↓"}</span>
-              <span className="truncate flex-1" style={{ color: t.counterpartyLabel && t.labelConfident ? C.ink2 : C.muted, fontFamily: t.counterpartyLabel && t.labelConfident ? "inherit" : "'JetBrains Mono', monospace" }}>
-                {t.counterpartyLabel && t.labelConfident ? t.counterpartyLabel : short(t.counterparty)}
-              </span>
-              <span className="shrink-0" style={{ color: dirColor }}>{t.direction === "out" ? "−" : "+"}{fmt(t.amount)} {t.asset}</span>
-              <span className="w-20 text-right shrink-0" style={{ color: C.muted }}>{day(t.unixTime)}</span>
+              <span className="truncate flex-1" style={{ color: t.counterpartyLabel && t.labelConfident ? C.ink2 : C.muted, fontFamily: t.counterpartyLabel && t.labelConfident ? "inherit" : "'JetBrains Mono', monospace" }}>{name}</span>
+              <span className="shrink-0" style={{ color: C.ink }}>{fmt(t.amount)} {t.asset}</span>
+              <span className="w-16 text-right shrink-0" style={{ color: dirColor }}>{t.direction === "out" ? "−" : "+"}{fmtUsd(t.usd) ?? "—"}</span>
+              <span className="w-16 text-right shrink-0" style={{ color: C.muted }}>{day(t.unixTime)}</span>
               {t.signature && <span style={{ color: C.blue }}><ExtIcon /></span>}
             </>
           );
@@ -644,21 +622,20 @@ function TransactionsPanel({ transfers, chain, view, setView }: { transfers: Tra
   );
 }
 
-// The money-flow map: wallet at the center, top counterparties around it, edges
-// weighted by amount and colored by direction (blue = out, aqua = in). Not bubbles.
+// Wallet-centered network map: top counterparties around it, edges weighted by USD and
+// colored by direction (blue = out, aqua = in). Not bubbles.
 function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
   const [hover, setHover] = useState<number | null>(null);
-  const amountOf = (c: CounterpartyFlow) => (view === "out" ? c.outAmount : view === "in" ? c.inAmount : c.totalAmount);
+  const usdOf = (c: CounterpartyFlow) => (view === "out" ? c.outUsd : view === "in" ? c.inUsd : c.totalUsd);
   const nodes = useMemo(
-    () => report.counterparties.filter((c) => amountOf(c) > 0).sort((a, b) => amountOf(b) - amountOf(a)).slice(0, 12),
+    () => report.counterparties.filter((c) => usdOf(c) > 0).sort((a, b) => usdOf(b) - usdOf(a)).slice(0, 12),
     [report, view],
   );
   if (nodes.length === 0) return null;
 
   const W = 820, H = 460, cx = W / 2, cy = H / 2, rx = 330, ry = 175;
-  const maxA = Math.max(...nodes.map(amountOf));
-  const asset = report.chain.nativeAsset;
-  const edgeColor = (c: CounterpartyFlow) => (view === "in" ? C.aqua : view === "out" ? C.blue : c.outAmount >= c.inAmount ? C.blue : C.aqua);
+  const maxU = Math.max(...nodes.map(usdOf));
+  const edgeColor = (c: CounterpartyFlow) => (view === "in" ? C.aqua : view === "out" ? C.blue : c.outUsd >= c.inUsd ? C.blue : C.aqua);
 
   const laid = nodes.map((c, i) => {
     const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
@@ -667,7 +644,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
       c, i, label,
       x: cx + Math.cos(ang) * rx,
       y: cy + Math.sin(ang) * ry,
-      w: 1.5 + Math.sqrt(amountOf(c) / maxA) * 7,
+      w: 1.5 + Math.sqrt(usdOf(c) / maxU) * 7,
       color: edgeColor(c),
       pw: Math.max(58, label.length * 7 + 20),
     };
@@ -681,7 +658,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
         <div className="ml-auto flex items-center gap-3 text-[10px]" style={{ color: C.muted }}>
           {hn ? (
             <span style={{ color: C.ink2 }}>
-              {hn.c.label && hn.c.labelConfident ? hn.c.label : short(hn.c.counterparty)} · <span style={{ color: C.blue }}>↑{fmt(hn.c.outAmount)}</span> · <span style={{ color: C.aqua }}>↓{fmt(hn.c.inAmount)}</span> {asset} · {hn.c.txCount} tx
+              {hn.c.label && hn.c.labelConfident ? hn.c.label : short(hn.c.counterparty)} · <span style={{ color: C.blue }}>↑{fmtUsd(hn.c.outUsd)}</span> · <span style={{ color: C.aqua }}>↓{fmtUsd(hn.c.inUsd)}</span> · {hn.c.txCount} tx
             </span>
           ) : (
             <>
@@ -692,31 +669,17 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} onMouseLeave={() => setHover(null)}>
-        {/* edges */}
         {laid.map((n) => (
-          <line
-            key={`e${n.i}`}
-            x1={cx} y1={cy} x2={n.x} y2={n.y}
-            stroke={n.color}
-            strokeWidth={hover === n.i ? n.w + 1.5 : n.w}
-            strokeLinecap="round"
-            opacity={hover == null ? 0.5 : hover === n.i ? 0.95 : 0.15}
-          />
+          <line key={`e${n.i}`} x1={cx} y1={cy} x2={n.x} y2={n.y} stroke={n.color} strokeWidth={hover === n.i ? n.w + 1.5 : n.w} strokeLinecap="round" opacity={hover == null ? 0.5 : hover === n.i ? 0.95 : 0.15} />
         ))}
-        {/* counterparty nodes */}
         {laid.map((n) => (
           <a key={`n${n.i}`} href={`${report.chain.explorerAddr}${n.c.counterparty}`} target="_blank" rel="noopener noreferrer">
-            <g
-              onMouseEnter={() => setHover(n.i)}
-              style={{ cursor: "pointer" }}
-              opacity={hover == null || hover === n.i ? 1 : 0.4}
-            >
+            <g onMouseEnter={() => setHover(n.i)} style={{ cursor: "pointer" }} opacity={hover == null || hover === n.i ? 1 : 0.4}>
               <rect x={n.x - n.pw / 2} y={n.y - 12} width={n.pw} height={24} rx={12} fill="#191920" stroke={n.color} strokeWidth={1} />
               <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize={11} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">{n.label}</text>
             </g>
           </a>
         ))}
-        {/* center wallet node */}
         <defs>
           <linearGradient id="wgrad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor={C.blue} />
@@ -724,9 +687,7 @@ function FlowGraph({ report, view }: { report: FlowReport; view: View }) {
           </linearGradient>
         </defs>
         <rect x={cx - 52} y={cy - 15} width={104} height={30} rx={15} fill="#101014" stroke="url(#wgrad)" strokeWidth={1.6} />
-        <text x={cx} y={cy + 4} textAnchor="middle" fontSize={12} fontWeight={700} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">
-          {short(report.wallet)}
-        </text>
+        <text x={cx} y={cy + 4} textAnchor="middle" fontSize={12} fontWeight={700} fill={C.ink} fontFamily="'Space Grotesk', sans-serif">{short(report.wallet)}</text>
       </svg>
     </div>
   );

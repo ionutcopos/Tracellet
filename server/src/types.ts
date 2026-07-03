@@ -75,8 +75,10 @@ export type LabelType = "cex" | "dex" | "bridge" | "staking" | "program" | "burn
 export interface Transfer {
   direction: Direction;      // "out" = wallet sent it, "in" = wallet received it
   counterparty: string;      // the OTHER party (recipient if out, sender if in)
-  amount: number;            // value moved, in the chain's native asset
-  asset: string;             // native asset or an on-chain token symbol
+  amount: number;            // value moved, in units of `asset`
+  asset: string;             // asset symbol (SOL/ETH/USDC/…)
+  assetAddress: string | null; // mint/contract; null for the chain's native asset
+  usd: number | null;        // USD value of this transfer (amount × price), if priced
   unixTime: number;
   signature: string | null;  // tx signature/hash, for a per-tx explorer link
   // human label for the counterparty if it's a known entity (exchange, bridge…)
@@ -101,31 +103,35 @@ export interface WalletTransfers {
 // An individual transfer with a counterparty — powers the per-counterparty drill-down.
 export interface CounterpartyTx {
   direction: Direction;
-  amount: number;
+  amount: number;        // native units of `asset`
+  asset: string;
+  usd: number | null;
   unixTime: number;
   signature: string | null;
 }
 
-// One counterparty, aggregated across both directions. The UI's direction toggle
-// and ranking control derive the displayed view from these raw amounts.
+// One counterparty, aggregated across both directions and valued in USD (the common
+// denominator that lets SOL, USDC and tokens rank together). The UI's direction
+// toggle and ranking control derive the displayed view from these amounts.
 export interface CounterpartyFlow {
   counterparty: string;
   label: string | null;
   labelType: LabelType | null;
   labelConfident: boolean; // false = protocol-context guess, not a confirmed identity
   isExchange: boolean;
-  outAmount: number;     // total sent TO this counterparty (native units)
-  inAmount: number;      // total received FROM this counterparty
-  netAmount: number;     // outAmount - inAmount
-  totalAmount: number;   // outAmount + inAmount (gross volume)
+  outUsd: number;        // total USD sent TO this counterparty
+  inUsd: number;         // total USD received FROM this counterparty
+  netUsd: number;        // outUsd - inUsd
+  totalUsd: number;      // outUsd + inUsd (gross volume)
   outTxCount: number;
   inTxCount: number;
   txCount: number;
-  pctOfOut: number;      // share of the wallet's total OUTFLOW, 0-100 (concentration)
+  pctOfOut: number;      // share of the wallet's total USD OUTFLOW, 0-100
+  assets: string[];      // distinct asset symbols moved with this counterparty
   firstUnix: number;
   lastUnix: number;
   flags: string[];
-  txs: CounterpartyTx[]; // the individual transfers, largest first
+  txs: CounterpartyTx[]; // the individual transfers, largest (USD) first
 }
 
 // ---- Current wallet holdings (balance + tokens) ----
@@ -150,16 +156,16 @@ export interface WalletHoldings {
 export interface FlowReport {
   wallet: string;
   chain: ChainInfo;
-  totalOut: number;      // total outflow in native units
-  totalIn: number;       // total inflow in native units
-  netTotal: number;      // totalIn - totalOut
+  totalOutUsd: number;   // total outflow in USD (all assets)
+  totalInUsd: number;    // total inflow in USD
+  netUsd: number;        // totalInUsd - totalOutUsd
   transferCount: number; // both directions
   outCount: number;
   inCount: number;
   counterpartyCount: number;
-  topRecipientPct: number; // concentration: share of OUTFLOW to the single biggest sink
-  exchangeOut: number;   // total that landed on known exchanges (cashed out)
-  counterparties: CounterpartyFlow[]; // ranked by outAmount, desc (UI re-ranks)
+  topRecipientPct: number; // concentration: share of USD OUTFLOW to the biggest sink
+  exchangeOutUsd: number;  // total USD that landed on known exchanges (cashed out)
+  counterparties: CounterpartyFlow[]; // ranked by outUsd, desc (UI re-ranks)
   allTransfers: Transfer[]; // full list for the "see all transactions" view
   holdings?: WalletHoldings;   // current balance + tokens (filled in by the route)
   // filled in by the LLM narration step

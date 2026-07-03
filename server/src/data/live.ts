@@ -1,5 +1,11 @@
 import type { ChainInfo, WalletTransfers, Transfer, WalletHoldings, TokenHolding } from "../types.ts";
 import { entityLabel, sourceLabel, isExchangeType, type Label } from "../labels.ts";
+import { fetchPrices, nativeKey, tokenKey, type PriceInfo } from "../prices.ts";
+
+// Token transfers below this USD value are dropped as spam/dust. Native transfers
+// keep their own lamport dust filter (rent). Priced stablecoin/token flows survive.
+const MIN_TOKEN_USD = 1;
+function short(a: string) { return `${a.slice(0, 4)}…${a.slice(-4)}`; }
 
 // Live on-chain data. The job of this file is: raw provider JSON -> WalletTransfers.
 // Nothing else in the app sees a raw provider response. Chain is already detected
@@ -26,15 +32,36 @@ interface HeliusNativeTransfer {
   toUserAccount: string;
   amount: number; // lamports
 }
+interface HeliusTokenTransfer {
+  fromUserAccount: string;
+  toUserAccount: string;
+  tokenAmount: number; // UI amount (decimals already applied)
+  mint: string;
+}
 interface HeliusTx {
   timestamp: number;
   signature: string;
   source?: string; // PUMP_FUN, JUPITER, RAYDIUM, SYSTEM_PROGRAM…
   nativeTransfers?: HeliusNativeTransfer[];
+  tokenTransfers?: HeliusTokenTransfer[];
+}
+
+// A transfer leg before pricing/labeling — collected first so we can batch-price
+// every mint in one call, then finalize.
+interface RawLeg {
+  direction: "in" | "out";
+  counterparty: string;
+  amount: number;
+  asset: string;            // "SOL" or a mint (replaced with symbol after pricing)
+  assetAddress: string | null;
+  unixTime: number;
+  signature: string;
+  source?: string;
 }
 
 async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: string): Promise<WalletTransfers> {
-  const transfers: Transfer[] = [];
+  // Pass 1 — collect raw native + token legs (unpriced).
+  const legs: RawLeg[] = [];
   let before: string | undefined;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -42,9 +69,7 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
       `${HELIUS_BASE}/addresses/${wallet}/transactions?api-key=${key}&limit=100` +
       (before ? `&before=${before}` : "");
     const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Helius API error ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`Helius API error ${res.status}`);
     const txs = (await res.json()) as HeliusTx[];
     if (!Array.isArray(txs) || txs.length === 0) break;
 
@@ -52,33 +77,61 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
       for (const nt of tx.nativeTransfers ?? []) {
         const out = nt.fromUserAccount === wallet;
         const inbound = nt.toUserAccount === wallet;
-        if (out === inbound) continue; // skip self-transfers and unrelated legs
+        if (out === inbound) continue;
         const counterparty = out ? nt.toUserAccount : nt.fromUserAccount;
         if (!counterparty) continue;
         const sol = nt.amount / LAMPORTS_PER_SOL;
         if (sol < DUST_SOL) continue; // drop rent/fee noise
-        // Tier 1: curated entity label (confident). Tier 2: protocol context from the
-        // tx `source` — NOT a confirmed identity yet, so labelConfident starts false
-        // and is verified against the on-chain account owner below.
-        const entity = entityLabel("solana", counterparty);
-        const meta: Label | null = entity ?? sourceLabel(tx.source);
-        transfers.push({
-          direction: out ? "out" : "in",
-          counterparty,
-          amount: +sol.toFixed(4),
-          asset: "SOL",
-          unixTime: tx.timestamp,
-          signature: tx.signature,
-          counterpartyLabel: meta?.label ?? null,
-          labelType: meta?.type ?? null,
-          labelConfident: entity != null, // curated = confident; source = verify below
-          isExchange: isExchangeType(meta?.type ?? null),
-        });
+        legs.push({ direction: out ? "out" : "in", counterparty, amount: +sol.toFixed(4), asset: "SOL", assetAddress: null, unixTime: tx.timestamp, signature: tx.signature, source: tx.source });
+      }
+      for (const tt of tx.tokenTransfers ?? []) {
+        const out = tt.fromUserAccount === wallet;
+        const inbound = tt.toUserAccount === wallet;
+        if (out === inbound) continue;
+        const counterparty = out ? tt.toUserAccount : tt.fromUserAccount;
+        if (!counterparty || !tt.mint || !(tt.tokenAmount > 0)) continue;
+        legs.push({ direction: out ? "out" : "in", counterparty, amount: tt.tokenAmount, asset: tt.mint, assetAddress: tt.mint, unixTime: tx.timestamp, signature: tx.signature, source: tx.source });
       }
     }
 
     before = txs[txs.length - 1].signature;
-    if (txs.length < 100) break; // last page
+    if (txs.length < 100) break;
+  }
+
+  // Price everything: native SOL + every distinct token mint.
+  const mints = [...new Set(legs.filter((l) => l.assetAddress).map((l) => l.assetAddress!))];
+  const prices = await fetchPrices([nativeKey(chain), ...mints.map((m) => tokenKey(chain, m))]);
+  const solPrice = prices.get(nativeKey(chain))?.price ?? null;
+
+  // Pass 2 — value, filter, label.
+  const transfers: Transfer[] = [];
+  for (const l of legs) {
+    let usd: number | null;
+    let asset = l.asset;
+    if (l.assetAddress) {
+      const p: PriceInfo | undefined = prices.get(tokenKey(chain, l.assetAddress));
+      usd = p ? +(l.amount * p.price).toFixed(2) : null;
+      if (usd == null || usd < MIN_TOKEN_USD) continue; // drop unpriced/spam tokens
+      asset = p!.symbol ? p!.symbol.toUpperCase() : short(l.assetAddress);
+    } else {
+      usd = solPrice != null ? +(l.amount * solPrice).toFixed(2) : null;
+    }
+    const entity = entityLabel("solana", l.counterparty);
+    const meta: Label | null = entity ?? sourceLabel(l.source);
+    transfers.push({
+      direction: l.direction,
+      counterparty: l.counterparty,
+      amount: l.amount,
+      asset,
+      assetAddress: l.assetAddress,
+      usd,
+      unixTime: l.unixTime,
+      signature: l.signature,
+      counterpartyLabel: meta?.label ?? null,
+      labelType: meta?.type ?? null,
+      labelConfident: entity != null, // curated = confident; source = verify below
+      isExchange: isExchangeType(meta?.type ?? null),
+    });
   }
 
   if (transfers.length === 0) {
@@ -88,15 +141,12 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
 
   // Verify source-derived labels: a real protocol account is program-owned; a plain
   // wallet is owned by the System Program. Only confirm the label for the former.
-  const toVerify = [...new Set(
-    transfers.filter((t) => t.counterpartyLabel && !t.labelConfident).map((t) => t.counterparty),
-  )];
+  const toVerify = [...new Set(transfers.filter((t) => t.counterpartyLabel && !t.labelConfident).map((t) => t.counterparty))];
   if (toVerify.length) {
     const owners = await heliusOwners(toVerify, key);
     for (const t of transfers) {
       if (t.counterpartyLabel && !t.labelConfident) {
         const owner = owners.get(t.counterparty);
-        // program-owned (owner exists and isn't the System Program) => confirmed
         if (owner && owner !== SYSTEM_PROGRAM) t.labelConfident = true;
       }
     }
@@ -104,8 +154,7 @@ async function heliusSolanaTransfers(wallet: string, chain: ChainInfo, key: stri
 
   transfers.sort((a, b) => a.unixTime - b.unixTime);
   return {
-    wallet,
-    chain,
+    wallet, chain,
     firstSeenUnix: transfers[0].unixTime,
     lastSeenUnix: transfers[transfers.length - 1].unixTime,
     transfers,
@@ -227,8 +276,11 @@ interface EtherscanTx {
   timeStamp: string;
   from: string;
   to: string;
-  value: string; // wei
+  value: string;          // wei (native) or raw token units (tokentx)
   isError?: string;
+  contractAddress?: string; // tokentx only
+  tokenSymbol?: string;     // tokentx only
+  tokenDecimal?: string;    // tokentx only
 }
 
 async function etherscanList(chainId: number, action: string, wallet: string, key: string): Promise<EtherscanTx[]> {
@@ -249,39 +301,73 @@ async function evmWalletTransfers(wallet: string, chain: ChainInfo, key: string)
   if (!chainId) throw new Error(`no Etherscan chainid for ${chain.id}`);
   const w = wallet.toLowerCase();
 
-  const [ext, internal] = await Promise.all([
+  // native external + internal, plus ERC-20 token transfers.
+  const [ext, internal, tok] = await Promise.all([
     etherscanList(chainId, "txlist", wallet, key),
     etherscanList(chainId, "txlistinternal", wallet, key),
+    etherscanList(chainId, "tokentx", wallet, key).catch(() => [] as EtherscanTx[]),
   ]);
 
-  const transfers: Transfer[] = [];
-  const add = (t: EtherscanTx) => {
+  // Pass 1 — collect raw legs.
+  const legs: RawLeg[] = [];
+  const nativeLeg = (t: EtherscanTx) => {
     if (t.isError === "1") return;
     const val = Number(t.value) / WEI_PER_ETH;
-    if (!(val > 0)) return; // skip 0-value contract calls (approvals etc.)
+    if (!(val > 0)) return; // skip 0-value contract calls
     const from = (t.from ?? "").toLowerCase();
     const to = (t.to ?? "").toLowerCase();
-    const out = from === w;
-    const inbound = to === w;
-    if (out === inbound) return; // skip self / unrelated
+    const out = from === w, inbound = to === w;
+    if (out === inbound) return;
     const counterparty = out ? t.to : t.from;
     if (!counterparty) return;
-    const meta: Label | null = entityLabel("evm", counterparty.toLowerCase());
+    legs.push({ direction: out ? "out" : "in", counterparty, amount: +val.toFixed(6), asset: chain.nativeAsset, assetAddress: null, unixTime: Number(t.timeStamp), signature: t.hash });
+  };
+  ext.forEach(nativeLeg);
+  internal.forEach(nativeLeg);
+  for (const t of tok) {
+    const from = (t.from ?? "").toLowerCase();
+    const to = (t.to ?? "").toLowerCase();
+    const out = from === w, inbound = to === w;
+    if (out === inbound || !t.contractAddress) continue;
+    const counterparty = out ? t.to : t.from;
+    if (!counterparty) continue;
+    const amount = Number(t.value) / 10 ** Number(t.tokenDecimal ?? 18);
+    if (!(amount > 0)) continue;
+    legs.push({ direction: out ? "out" : "in", counterparty, amount, asset: t.tokenSymbol ?? "?", assetAddress: t.contractAddress.toLowerCase(), unixTime: Number(t.timeStamp), signature: t.hash });
+  }
+
+  // Price native + every token contract.
+  const contracts = [...new Set(legs.filter((l) => l.assetAddress).map((l) => l.assetAddress!))];
+  const prices = await fetchPrices([nativeKey(chain), ...contracts.map((c) => tokenKey(chain, c))]);
+  const nativePrice = prices.get(nativeKey(chain))?.price ?? null;
+
+  // Pass 2 — value, filter, label.
+  const transfers: Transfer[] = [];
+  for (const l of legs) {
+    let usd: number | null;
+    if (l.assetAddress) {
+      const p = prices.get(tokenKey(chain, l.assetAddress));
+      usd = p ? +(l.amount * p.price).toFixed(2) : null;
+      if (usd == null || usd < MIN_TOKEN_USD) continue; // drop unpriced/spam tokens
+    } else {
+      usd = nativePrice != null ? +(l.amount * nativePrice).toFixed(2) : null;
+    }
+    const meta: Label | null = entityLabel("evm", l.counterparty.toLowerCase());
     transfers.push({
-      direction: out ? "out" : "in",
-      counterparty,
-      amount: +val.toFixed(6),
-      asset: chain.nativeAsset,
-      unixTime: Number(t.timeStamp),
-      signature: t.hash,
+      direction: l.direction,
+      counterparty: l.counterparty,
+      amount: l.amount,
+      asset: l.asset,
+      assetAddress: l.assetAddress,
+      usd,
+      unixTime: l.unixTime,
+      signature: l.signature,
       counterpartyLabel: meta?.label ?? null,
       labelType: meta?.type ?? null,
-      labelConfident: meta != null, // EVM labels are curated → confident
+      labelConfident: meta != null,
       isExchange: isExchangeType(meta?.type ?? null),
     });
-  };
-  ext.forEach(add);
-  internal.forEach(add);
+  }
 
   if (transfers.length === 0) {
     const now = Math.floor(Date.now() / 1000);
@@ -304,9 +390,15 @@ async function evmHoldings(wallet: string, chain: ChainInfo, key: string): Promi
   if (!res.ok) throw new Error(`Etherscan API error ${res.status}`);
   const j = (await res.json()) as { result: string };
   const nativeBalance = +(Number(j.result) / WEI_PER_ETH).toFixed(6);
+  const price = (await fetchPrices([nativeKey(chain)])).get(nativeKey(chain))?.price ?? null;
   // ERC-20 token holdings need a token-balance list (Etherscan Pro) — not on free
-  // tier, so we report native balance only for now.
-  return { nativeBalance, nativeAsset: chain.nativeAsset, nativeUsd: null, tokenCount: 0, nftCount: 0, tokens: [] };
+  // tier, so we report native balance (valued in USD) only for now.
+  return {
+    nativeBalance,
+    nativeAsset: chain.nativeAsset,
+    nativeUsd: price != null ? +(nativeBalance * price).toFixed(2) : null,
+    tokenCount: 0, nftCount: 0, tokens: [],
+  };
 }
 
 // ---- dispatch ----

@@ -75,12 +75,12 @@ export async function narrate(r: TokenReport): Promise<TokenReport> {
 
 function flowTemplate(r: FlowReport): { summary: string; concentration: "low" | "medium" | "high" } {
   const c = concentrationVerdict(r);
-  const asset = r.chain.nativeAsset;
+  const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
   const top = r.counterparties[0];
-  const topLabel = top?.label ?? (top ? `${top.counterparty.slice(0, 6)}…` : "n/a");
-  const cashedPct = r.totalOut > 0 ? Math.round((r.exchangeOut / r.totalOut) * 100) : 0;
+  const topLabel = top?.label && top?.labelConfident ? top.label : (top ? `${top.counterparty.slice(0, 6)}…` : "n/a");
+  const cashedPct = r.totalOutUsd > 0 ? Math.round((r.exchangeOutUsd / r.totalOutUsd) * 100) : 0;
   const summary =
-    `${r.totalOut} ${asset} left this wallet and ${r.totalIn} ${asset} came in, across ` +
+    `${usd(r.totalOutUsd)} left this wallet and ${usd(r.totalInUsd)} came in, across ` +
     `${r.transferCount} transfers with ${r.counterpartyCount} counterparties on ${r.chain.name}. ` +
     `The largest outflow sink (${topLabel}) took ${r.topRecipientPct}%; ${cashedPct}% reached ` +
     `known exchanges. Concentration: ${c}.`;
@@ -97,10 +97,10 @@ export async function narrateFlow(r: FlowReport): Promise<FlowReport> {
   const baseline = concentrationVerdict(r);
   const system =
     "You are an on-chain fund-flow analyst. You will receive a JSON report of a " +
-    "wallet's already-computed transfers, aggregated by counterparty (with outAmount " +
-    "and inAmount per counterparty), on a specific blockchain. Do NOT invent any " +
-    "numbers or addresses — only use values present in the JSON, and always state " +
-    "amounts in the chain's nativeAsset. Write a 3-4 sentence plain-language account " +
+    "wallet's already-computed transfers, aggregated by counterparty (with outUsd and " +
+    "inUsd per counterparty), on a specific blockchain. All amounts are already in USD. " +
+    "Do NOT invent any numbers or addresses — only use values present in the JSON, and " +
+    "state money amounts in USD (e.g. $12,400). Write a 3-4 sentence plain-language account " +
     "of where this wallet's money went and came from (top counterparties, how " +
     "concentrated the outflow is, how much reached exchanges / mixers), then give a " +
     "concentration verdict of low, medium, or high. A heuristic baseline is provided; " +
