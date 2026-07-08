@@ -1,7 +1,11 @@
 <p align="center">
-  <video src="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4" poster="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch-poster.jpg" width="820" controls muted playsinline>
-    <a href="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4">▶ Watch the Tracellet launch video</a>
-  </video>
+  <a href="docs/tracellet-launch.mp4">
+    <img src="docs/tracellet-launch.gif" alt="Tracellet — launch trailer: paste a wallet, follow the money in and out, see the flow map" width="820">
+  </a>
+</p>
+
+<p align="center">
+  <sub>▶ <a href="docs/tracellet-launch.mp4">Watch the full trailer with sound</a></sub>
 </p>
 
 <p align="center">
