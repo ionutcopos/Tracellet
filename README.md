@@ -5,10 +5,6 @@
 </p>
 
 <p align="center">
-  <sub>▶ <a href="docs/tracellet-launch.mp4">Watch the full trailer with sound</a></sub>
-</p>
-
-<p align="center">
   <img src=".github/assets/logo.png" alt="Tracellet logo" width="96" height="96">
 </p>
 
