@@ -11,6 +11,12 @@ in plain US dollars, where its money came from, where it went, and who was on th
 <!-- Live demo: add the link here once deployed -->
 
 <p align="center">
+  <video src="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4" poster="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch-poster.jpg" width="760" controls muted playsinline>
+    <a href="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4">▶ Watch the Tracellet launch video</a>
+  </video>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/tracellet-demo.gif" alt="Tracing a Solana wallet end to end" width="760">
 </p>
 
