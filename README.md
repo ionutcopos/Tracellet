@@ -1,4 +1,10 @@
 <p align="center">
+  <video src="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4" poster="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch-poster.jpg" width="820" controls muted playsinline>
+    <a href="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4">▶ Watch the Tracellet launch video</a>
+  </video>
+</p>
+
+<p align="center">
   <img src=".github/assets/logo.png" alt="Tracellet logo" width="96" height="96">
 </p>
 
@@ -9,12 +15,6 @@ has a public address and a public transaction history; paste one and Tracellet s
 in plain US dollars, where its money came from, where it went, and who was on the other end.
 
 <!-- Live demo: add the link here once deployed -->
-
-<p align="center">
-  <video src="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4" poster="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch-poster.jpg" width="760" controls muted playsinline>
-    <a href="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4">▶ Watch the Tracellet launch video</a>
-  </video>
-</p>
 
 <p align="center">
   <img src="docs/screenshots/tracellet-demo.gif" alt="Tracing a Solana wallet end to end" width="760">
