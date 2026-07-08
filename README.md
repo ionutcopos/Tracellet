@@ -1,4 +1,10 @@
 <p align="center">
+  <video src="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4" poster="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch-poster.jpg" width="820" controls muted playsinline>
+    <a href="https://github.com/ionutcopos/Tracellet/raw/main/docs/tracellet-launch.mp4">▶ Watch the Tracellet launch video</a>
+  </video>
+</p>
+
+<p align="center">
   <img src=".github/assets/logo.png" alt="Tracellet logo" width="96" height="96">
 </p>
 
